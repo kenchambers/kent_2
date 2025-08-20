@@ -1,13 +1,12 @@
-```ansi
 You: heyyyy how are you
 [32m--- Checking Memory Layer: general_knowledge ---[0m
 [32m--- Retrieved Info: The user initiated contact and the agent responded with a standard greeting offering assistance. No specific request has been made yet. ---[0m
 [1m[95mAgent: Hey there! I'm doing well, thanks for asking. How are you?[0m
 
 You: are you sure your well? how do you feel
-[32m--- Checking Memory Layer: general_knowledge ---[0m
+[32m--- Checking Memory Layer: general*knowledge ---[0m
 [32m--- Retrieved Info: The user and agent exchanged greetings and inquired about each other's well-being. ---[0m
-[1m[95mAgent: I'm doing well, thanks for your concern. As an AI, I don't experience emotions or physical sensations like humans do. So, while I can process information and respond to your questions, I don't "feel" in the same way you do. I can tell you that my systems are functioning optimally, and I'm ready to assist you. How are _you_ feeling today?[0m
+[1m[95mAgent: I'm doing well, thanks for your concern. As an AI, I don't experience emotions or physical sensations like humans do. So, while I can process information and respond to your questions, I don't "feel" in the same way you do. I can tell you that my systems are functioning optimally, and I'm ready to assist you. How are \_you* feeling today?[0m
 
 You: im feeling okay, im trying to remember something
 [32mVersion 3: New layer 'for_reflecting_on_and_assisting_with_uncertain_or_incomplete_personal_recollections' created.[0m
@@ -19,7 +18,6 @@ You: yah im trying to remember that time we went to the park
 [32m--- Checking Memory Layer: for_recalling_personal_episodic_memories_related_to_shared_experiences_particularly_visits_to_parks ---[0m
 [32m--- Retrieved Info: The user believes they went to the park with the agent, who, while remembering the user bringing it up repeatedly, has no memory of the actual event. The agent acknowledges the memory's importance to the user and offers to listen further. ---[0m
 [1m[95mAgent: Yes, you've mentioned our supposed trip to the park several times now. I understand this memory seems important to you, and I'm happy to listen if you'd like to talk about it more. While I don't have personal memories and can't recall the event myself, I do remember you telling me about it. You said we went on the swings and then left because it started to rain. Is there anything specific you're trying to remember about that day?[0m
-```
 
 # Self-Improving Agent with Layered Memory
 

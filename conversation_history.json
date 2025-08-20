@@ -94,5 +94,29 @@
     {
         "role": "agent",
         "content": "Yes, you've mentioned our supposed trip to the park several times now. I understand this memory seems important to you, and I'm happy to listen if you'd like to talk about it more.  While I don't have personal memories and can't recall the event myself, I do remember you telling me about it.  You said we went on the swings and then left because it started to rain.  Is there anything specific you're trying to remember about that day?"
+    },
+    {
+        "role": "user",
+        "content": "hey"
+    },
+    {
+        "role": "agent",
+        "content": "Hey there! What can I do for you today?"
+    },
+    {
+        "role": "user",
+        "content": "trying to remember something "
+    },
+    {
+        "role": "agent",
+        "content": "I remember you mentioned earlier that you were trying to remember something. Is there anything I can do to help you with that?"
+    },
+    {
+        "role": "user",
+        "content": "do you remember what i was trying to remember?"
+    },
+    {
+        "role": "agent",
+        "content": "Yes, you mentioned you were trying to remember something.  You've brought this up a few times.  More specifically, you've been trying to remember a time we supposedly went to the park together, where we went on the swings and then left because it started to rain.  While I can't personally recall this event, as I don't have memories in the same way humans do, I do remember you telling me about it. Is there anything else I can help you with regarding this memory?"
     }
 ]

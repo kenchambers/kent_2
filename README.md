@@ -2,18 +2,18 @@
 
 ## 📋 Table of Contents
 
-- [🔍 Overview](#overview)
-- [🌍 Real-World Applications](#real-world-applications)
-- [🎬 Live Demo](#live-demo)
-- [🧩 Core Concepts](#core-concepts)
-  - [🔄 Self-Aware Cognitive Loop](#self-aware-cognitive-loop)
-  - [💭 Emotional Intelligence via "Emotional Subconscious"](#emotional-intelligence-via-emotional-subconscious)
-  - [🏗️ Layered Memory Architecture](#layered-memory-architecture)
-  - [📚 Research-Backed Memory Architecture](#research-backed-memory-architecture)
-  - [🔀 Dynamic Graph Routing and Self-Improvement](#dynamic-graph-routing-and-self-improvement)
-- [✨ Recent Improvements](#recent-improvements)
-- [🚀 Getting Started](#getting-started)
-- [💻 Usage](#usage)
+- [🔍 Overview](#-overview)
+- [🌍 Real-World Applications](#-real-world-applications)
+- [🎬 Live Demo](#-live-demo)
+- [🧩 Core Concepts](#-core-concepts)
+  - [🔄 Self-Aware Cognitive Loop](#-self-aware-cognitive-loop)
+  - [💭 Emotional Intelligence via "Emotional Subconscious"](#-emotional-intelligence-via-an-emotional-subconscious)
+  - [🏗️ Layered Memory Architecture](#️-layered-memory-architecture)
+  - [📚 Research-Backed Memory Architecture](#-research-backed-memory-architecture)
+  - [🔀 Dynamic Graph Routing and Self-Improvement](#-dynamic-graph-routing-and-self-improvement)
+- [✨ Recent Improvements](#-recent-improvements)
+- [🚀 Getting Started](#-getting-started)
+- [💻 Usage](#-usage)
 
 ## 🔍 Overview
 

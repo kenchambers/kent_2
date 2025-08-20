@@ -1,0 +1,17 @@
+{
+    "version": 3,
+    "layers": {
+        "general_knowledge": {
+            "description": "For general questions and knowledge.",
+            "vector_store_path": "vector_stores/general_knowledge.faiss"
+        },
+        "for_recalling_personal_episodic_memories_related_to_shared_experiences_particularly_visits_to_parks": {
+            "description": "For recalling personal episodic memories related to shared experiences, particularly visits to parks.",
+            "vector_store_path": "vector_stores/for_recalling_personal_episodic_memories_related_to_shared_experiences_particularly_visits_to_parks.faiss"
+        },
+        "for_reflecting_on_and_assisting_with_uncertain_or_incomplete_personal_recollections": {
+            "description": "For reflecting on and assisting with uncertain or incomplete personal recollections.",
+            "vector_store_path": "vector_stores/for_reflecting_on_and_assisting_with_uncertain_or_incomplete_personal_recollections.faiss"
+        }
+    }
+}

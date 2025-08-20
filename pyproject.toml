@@ -1,0 +1,29 @@
+[project]
+name = "self_improving_agent"
+version = "0.1.0"
+description = "A self-improving agent with multi-layered memory using LangGraph."
+authors = [
+    {name = "AI Assistant", email = "assistant@example.com"},
+]
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+
+dependencies = [
+    "langchain>=0.2.0",
+    "langgraph>=0.1.0",
+    "langchain-google-genai>=1.0.3",
+    "google-generativeai>=0.5.4",
+    "faiss-cpu>=1.8.0",
+    "langchain-community>=0.2.0",
+    "python-dotenv>=1.0.1",
+    "tiktoken>=0.7.0",
+]
+
+[project.scripts]
+kent = "self_improving_agent.main:main"
+
+[tool.uv]
+dev-dependencies = [
+    "ruff>=0.4.5",
+]

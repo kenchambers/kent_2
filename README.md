@@ -36,7 +36,7 @@ This repository contains a Python-based command-line AI agent implementing cutti
 
 The agent's intelligence is not just in its knowledge, but in its awareness of that knowledge. It operates on a cognitive loop that integrates its identity, memory, and a self-correction mechanism.
 
-1.  **Core Identity**: The agent's most foundational traits, like its name, are stored in a `core_identity.json` file. This information is loaded at startup, giving the agent a persistent, deterministic sense of self. It isn't a "memory" to be searched for; it's a core attribute of who the agent is.
+1.  **Enhanced Core Identity**: The agent's most foundational traits are stored in a `core_identity.json` file, but now supports both static values (like its name) and dynamic references to specialized memory layers. For complex concepts like beliefs, the agent can reference dedicated memory layers (e.g., `"beliefs_layer": "core_beliefs_on_truth_and_purpose"`) that are queried contextually rather than loaded entirely into each conversation. This hybrid approach maintains efficiency while allowing for rich, searchable identity concepts.
 2.  **Proactive Self-Awareness**: Before generating any response, the agent receives a `SELF-AWARENESS CHECK` in its prompt context. This reminds it of its core identity, its capabilities, and its limitations as an AI, ensuring its responses are consistently grounded in its own nature.
 3.  **Reactive Self-Correction (The Conscience)**: After generating a response but _before_ sending it to the user, the agent's `Conscience` module critiques the answer. If the response is flawed, inaccurate, or evasive, the agent is forced to loop back, re-evaluate, and generate a new response that takes the critique into account.
 
@@ -57,7 +57,8 @@ The agent implements a dual-memory system inspired by recent AI research (HEMA, 
 - **Short-Term Summary**: Instead of storing raw conversation history, the agent maintains a dynamically updated, concise summary of recent interactions, preserving narrative coherence while minimizing token usage.
 - **Long-Term Conversational Memory**: A queryable vector store that semantically indexes the entire conversation history, enabling retrieval of relevant past interactions regardless of when they occurred.
 - **Topic-Specific Layers**: Specialized knowledge domains stored as separate vector stores, allowing efficient retrieval and preventing cross-domain interference.
-- **Dynamic Memory Retrieval**: At each turn, the agent actively queries its long-term memory for contextually relevant information, mimicking human episodic recall.
+- **Core Identity Layers**: Complex identity concepts (like beliefs and values) can be stored as searchable memory layers, enabling rich philosophical frameworks without conversation context bloat.
+- **Dynamic Memory Retrieval**: At each turn, the agent actively queries both its long-term memory and relevant identity layers for contextually relevant information, mimicking human episodic recall and value-based reasoning.
 
 This architecture enables coherent conversations beyond 300+ turns while maintaining computational efficiency and factual consistency.
 
@@ -75,6 +76,21 @@ The core of the self-improvement mechanism lies in a "router" node within the gr
     - Update the agent's central configuration file (`agent_config.json`) with the new layer, incrementing its own version number.
 
 This process simulates learning. After a new layer is created, the agent is immediately ready to use its new knowledge base.
+
+### Recent Improvements (v6+)
+
+**Enhanced Core Identity System**:
+
+- **Hybrid Identity Architecture**: The `core_identity.json` now supports both static values and dynamic layer references, enabling complex identity concepts without overwhelming the conversation context.
+- **Belief Layer Integration**: Core beliefs can now be stored in dedicated memory layers and retrieved contextually, making the agent's philosophical framework both scalable and searchable.
+- **Recursion Loop Prevention**: Improved the Conscience module to prevent infinite self-correction loops when dealing with complex philosophical concepts, making the agent more stable and reliable.
+
+**Technical Improvements**:
+
+- Added `_query_core_beliefs` node to the agent graph for dynamic belief retrieval
+- Updated identity tracking to support `beliefs_layer` references alongside traditional static fields
+- Enhanced self-awareness prompts to reflect the new dynamic belief system
+- Improved error handling and stability in the self-correction mechanism
 
 ## Getting Started
 

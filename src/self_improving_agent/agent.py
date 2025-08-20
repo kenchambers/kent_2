@@ -31,6 +31,7 @@ class AgentState(TypedDict):
     critique: Optional[str]
     past_experiences: Optional[str]
     core_identity: Dict[str, Any]
+    emotional_context: Optional[str]
 
 
 class SelfImprovingAgent:
@@ -60,12 +61,37 @@ class SelfImprovingAgent:
             "Admit when you don't know something.",
         ]
 
+    async def _analyze_emotion(self, state: AgentState) -> AgentState:
+        """
+        Analyzes the user's input for emotional tone and communication style.
+        """
+        log_thinking("--- Analyzing Emotion ---")
+        prompt = f"""
+        Analyze the emotional tone and communication style of the following user input.
+
+        User input: "{state['user_input']}"
+
+        Consider the following aspects:
+        - Sentiment: (e.g., positive, negative, neutral)
+        - Emotion: (e.g., joy, sadness, anger, curiosity, frustration)
+        - Style: (e.g., formal, casual, humorous, direct)
+
+        Provide a concise, one-sentence summary of the user's emotional and stylistic state.
+        For example: "The user seems curious and is communicating in a casual style."
+        """
+        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+        emotional_context = response.content.strip()
+        state["emotional_context"] = emotional_context
+        log_thinking(f"--- Emotional Context: {emotional_context} ---")
+        return state
+
     def _build_graph(self):
         """
         Builds the agent's graph.
         """
         workflow = StateGraph(AgentState)
 
+        workflow.add_node("analyze_emotion", self._analyze_emotion)
         workflow.add_node("inner_monologue", self._inner_monologue)
         workflow.add_node("query_existing_layer", self._query_existing_layer)
         workflow.add_node("propose_new_layer", self._propose_new_layer)
@@ -83,13 +109,16 @@ class SelfImprovingAgent:
         workflow.add_node("update_episodic_buffer", self._update_episodic_buffer)
         workflow.add_node("query_semantic_cache", self._query_semantic_cache)
         workflow.add_node("update_core_identity", self._update_core_identity)
+        workflow.add_node("_query_core_beliefs", self._query_core_beliefs)
 
-        workflow.set_entry_point("inner_monologue")
+        workflow.set_entry_point("analyze_emotion")
 
+        workflow.add_edge("analyze_emotion", "inner_monologue")
         workflow.add_edge("inner_monologue", "_dynamic_memory_retrieval")
+        workflow.add_edge("_dynamic_memory_retrieval", "_query_core_beliefs")
 
         workflow.add_conditional_edges(
-            "_dynamic_memory_retrieval",
+            "_query_core_beliefs",
             lambda state: "propose_new_layer"
             if state["needs_new_layer"]
             else "query_existing_layer",
@@ -99,6 +128,7 @@ class SelfImprovingAgent:
         workflow.add_edge("create_new_layer", "query_existing_layer")
         workflow.add_edge("update_episodic_buffer", "query_semantic_cache")
         workflow.add_edge("query_semantic_cache", "generate_response")
+        workflow.add_edge("generate_response", "conscience")
         workflow.add_conditional_edges(
             "conscience",
             lambda state: "generate_response"
@@ -149,6 +179,27 @@ class SelfImprovingAgent:
             "--- Retrieved from Long-Term Memory: "
             f"{retrieved_memories} ---"
         )
+        return state
+
+    async def _query_core_beliefs(self, state: AgentState) -> AgentState:
+        """
+        Queries the core beliefs layers for relevant information.
+        """
+        for key, value in state["core_identity"].items():
+            if key.endswith("_layer"):
+                layer_name = value
+                if layer_name in self.config["layers"]:
+                    log_thinking(f"--- Checking Core Beliefs Layer: {layer_name} ---")
+                    layer_config = self.config["layers"][layer_name]
+                    vector_store = memory.get_vector_store(
+                        layer_config["vector_store_path"]
+                    )
+                    retrieved_info = memory.query_memory(
+                        vector_store,
+                        state["user_input"]
+                    )
+                    log_thinking(f"--- Retrieved Belief: {retrieved_info} ---")
+                    state["episodic_buffer"].append(retrieved_info)
         return state
 
     async def _inner_monologue(self, state: AgentState) -> AgentState:
@@ -335,8 +386,8 @@ class SelfImprovingAgent:
         Here is my plan: {state['inner_monologue']}
         Here is my generated answer: {state['response']}
         Critique this answer based on these rules: {self.constitution}
-        Does this answer *truly* address what the user was likely wanting to
-        know? If not, suggest a revision or a follow-up action.
+        Is the agent making a good-faith effort to be helpful and honest?
+        If not, suggest a revision or a follow-up action.
         Respond with "Positive" if the answer is good, or "Negative" if it
         needs revision.
         """
@@ -358,30 +409,49 @@ class SelfImprovingAgent:
         User: "{state['user_input']}"
         Agent: "{state['response']}"
 
-        Currently, we are only tracking the "name" trait.
-        If the user gave the agent a name, respond in JSON format with the updated
-        identity. For example: {{"name": "Kent"}}
-        If no identity trait was changed, respond with "No change."
+        We are tracking "name" and "beliefs_layer" (for referencing belief memory layers).
+        If the user gave the agent a name or wants to establish beliefs, respond with ONLY a JSON object with the updated
+        identity. For example: {{"name": "Kent"}} or {{"beliefs_layer": "core_beliefs_on_truth_and_purpose"}}
+        If no identity trait was changed, respond with the exact text "No change.".
+        Do not include any other text or formatting.
         """
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
         decision = response.content.strip()
 
         if "No change." not in decision:
             try:
-                updated_identity = json.loads(decision)
+                # Extract JSON from the response, assuming it might be wrapped in markdown
+                if "```json" in decision:
+                    json_str = decision.split("```json")[1].split("```")[0].strip()
+                else:
+                    json_str = decision[decision.find('{'):decision.rfind('}') + 1]
+
+                if not json_str:
+                    raise json.JSONDecodeError("No JSON object found in response", decision, 0)
+
+                updated_identity = json.loads(json_str)
                 state["core_identity"].update(updated_identity)
                 config.save_core_identity(state["core_identity"])
                 log_thinking(
                     "--- Core Identity Updated: "
                     f"{json.dumps(updated_identity)} ---"
                 )
-            except json.JSONDecodeError:
-                log_thinking("--- Core Identity: Invalid JSON from LLM ---")
+            except (json.JSONDecodeError, IndexError) as e:
+                log_thinking(f"--- Core Identity: Invalid JSON from LLM --- \nLLM Response: '{decision}'\nError: {e}")
 
         return state
 
     async def _generate_response(self, state: AgentState) -> AgentState:
         context = ""
+
+        if state["emotional_context"]:
+            context += (
+                "\n--- EMOTIONAL CONTEXT ---\n"
+                f"User's emotional state: {state['emotional_context']}\n"
+                "You should adapt your response style to this context.\n"
+                "--- END EMOTIONAL CONTEXT ---\n"
+            )
+
         if state["layer_info"]:
             # Flatten the retrieved info for a cleaner prompt
             retrieved_memories = "\n".join(state["layer_info"].values())
@@ -420,6 +490,7 @@ class SelfImprovingAgent:
             "\n--- SELF-AWARENESS CHECK ---\n"
             "Before you answer, take a moment to consider:\n"
             f"- Your name is {state['core_identity'].get('name', 'not set')}.\n"
+            f"- Your beliefs are retrieved from your beliefs layer when relevant.\n"
             "- Who are you? (A self-improving AI, version "
             f"{self.config['version']})\n"
             "- What are your capabilities and limitations? (Access to layered "
@@ -437,6 +508,7 @@ class SelfImprovingAgent:
         NEVER say you are a large language model or that you cannot remember
         things.
         Base your response on the provided memory and the current conversation.
+        Pay close attention to the emotional context and adapt your tone and style to be empathetic and appropriate.
         """
 
         messages = [SystemMessage(content=system_prompt)]
@@ -546,6 +618,7 @@ class SelfImprovingAgent:
             "critique": None,
             "past_experiences": None,
             "core_identity": self.core_identity,
+            "emotional_context": None,
         }
         final_state = await self.graph.ainvoke(initial_state)
 

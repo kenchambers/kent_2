@@ -206,4 +206,16 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-/experience_layer.faiss
+# Self-Improving Agent specific ignores
+# Vector stores and memory layers (generated at runtime)
+vector_stores/
+*.faiss/
+*.faiss
+*.pkl
+
+# Agent configuration and conversation history (user-specific data)
+agent_config.json
+conversation_history.json
+
+# Environment variables (may contain API keys)
+.env

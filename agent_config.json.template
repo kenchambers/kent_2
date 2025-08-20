@@ -1,0 +1,9 @@
+{
+    "version": 1,
+    "layers": {
+        "general_knowledge": {
+            "description": "For general questions and knowledge.",
+            "vector_store_path": "vector_stores/general_knowledge.faiss"
+        }
+    }
+}

@@ -26,15 +26,23 @@ _--- New memory layer created: `for_reflecting_on_and_assisting_with_uncertain_o
 _--- Checking Memory Layer: `for_recalling_personal_episodic_memories_related_to_shared_experiences_particularly_visits_to_parks` ---_
 **Agent:** Yes, you've mentioned our supposed trip to the park several times now. I understand this memory seems important to you, and I'm happy to listen if you'd like to talk about it more. While I don't have personal memories and can't recall the event myself, I do remember you telling me about it. You said we went on the swings and then left because it started to rain. Is there anything specific you're trying to remember about that day?
 
-# Self-Improving Agent with Layered Memory
+# Self-Improving Agent with Advanced Memory Architecture
 
-This repository contains a Python-based command-line AI agent that demonstrates self-improvement and a multi-layered memory architecture using LangGraph and Google's Gemini 2.5 Pro. The agent can dynamically create new "memory layers" based on the user's input, allowing it to learn and expand its knowledge base over time.
+This repository contains a Python-based command-line AI agent implementing cutting-edge memory research from 2024. Built on LangGraph and Google's Gemini 2.5 Pro, the agent features a sophisticated cognitive architecture with self-correction, proactive self-awareness, and a research-backed dual-memory system that dynamically creates new knowledge layers.
 
 ## Core Concepts
 
+### Self-Aware Cognitive Loop
+
+The agent's intelligence is not just in its knowledge, but in its awareness of that knowledge. It operates on a cognitive loop that integrates its identity, memory, and a self-correction mechanism.
+
+1.  **Core Identity**: The agent's most foundational traits, like its name, are stored in a `core_identity.json` file. This information is loaded at startup, giving the agent a persistent, deterministic sense of self. It isn't a "memory" to be searched for; it's a core attribute of who the agent is.
+2.  **Proactive Self-Awareness**: Before generating any response, the agent receives a `SELF-AWARENESS CHECK` in its prompt context. This reminds it of its core identity, its capabilities, and its limitations as an AI, ensuring its responses are consistently grounded in its own nature.
+3.  **Reactive Self-Correction (The Conscience)**: After generating a response but _before_ sending it to the user, the agent's `Conscience` module critiques the answer. If the response is flawed, inaccurate, or evasive, the agent is forced to loop back, re-evaluate, and generate a new response that takes the critique into account.
+
 ### Layered Memory Architecture
 
-The agent's memory is not a single, monolithic entity. Instead, it is composed of multiple, distinct "layers," each represented by a separate FAISS vector store. Each layer is dedicated to a specific topic or domain of knowledge.
+The agent's long-term memory is a searchable knowledge base, distinct from its core identity. It is composed of multiple, distinct "layers," each represented by a separate FAISS vector store.
 
 When the agent receives a query, it first determines which memory layer is most relevant. This modular approach offers several advantages:
 
@@ -42,15 +50,16 @@ When the agent receives a query, it first determines which memory layer is most 
 - **Organization**: Knowledge is neatly organized by topic, preventing information from different domains from interfering with each other.
 - **Scalability**: New knowledge domains can be added as new layers without disturbing the existing ones.
 
-### Cognitive Memory Architecture
+### Research-Backed Memory Architecture
 
-The agent's memory is further organized into a cognitive architecture that mirrors human memory functions:
+The agent implements a dual-memory system inspired by recent AI research (HEMA, Mem0, LongMem):
 
-- **Working Memory**: This is a short-term buffer that holds the last few turns of the conversation. It provides immediate context, allowing the agent to follow the flow of a discussion and refer to things that were just said.
-- **Episodic Buffer**: This layer stores information retrieved from the long-term topical memory (the FAISS vector stores). When you ask about a topic, the relevant facts are loaded here, acting as the agent's "recollection" of that subject.
-- **Semantic Cache**: A simple key-value store that caches direct questions and their answers. If you ask the same question again, the agent can retrieve the answer instantly from this cache, improving response time.
+- **Short-Term Summary**: Instead of storing raw conversation history, the agent maintains a dynamically updated, concise summary of recent interactions, preserving narrative coherence while minimizing token usage.
+- **Long-Term Conversational Memory**: A queryable vector store that semantically indexes the entire conversation history, enabling retrieval of relevant past interactions regardless of when they occurred.
+- **Topic-Specific Layers**: Specialized knowledge domains stored as separate vector stores, allowing efficient retrieval and preventing cross-domain interference.
+- **Dynamic Memory Retrieval**: At each turn, the agent actively queries its long-term memory for contextually relevant information, mimicking human episodic recall.
 
-This layered, cognitive approach allows the agent to manage information more effectively, leading to more coherent and context-aware conversations.
+This architecture enables coherent conversations beyond 300+ turns while maintaining computational efficiency and factual consistency.
 
 ### Dynamic Graph Routing and Self-Improvement
 
@@ -65,7 +74,7 @@ The core of the self-improvement mechanism lies in a "router" node within the gr
     - Initialize a new FAISS vector store for it.
     - Update the agent's central configuration file (`agent_config.json`) with the new layer, incrementing its own version number.
 
-This process simulates learning. After a new layer is created, the agent "reboots" with its new configuration and is immediately ready to use its new knowledge base.
+This process simulates learning. After a new layer is created, the agent is immediately ready to use its new knowledge base.
 
 ## Getting Started
 

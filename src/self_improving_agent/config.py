@@ -58,3 +58,21 @@ def load_api_key() -> str:
     if not api_key:
         raise ValueError("GOOGLE_API_KEY not found in .env file.")
     return api_key
+
+CORE_IDENTITY_FILE = Path("src/self_improving_agent/core_identity.json")
+
+def get_core_identity() -> Dict[str, Any]:
+    """
+    Loads the agent's core identity from the identity file.
+    """
+    if not CORE_IDENTITY_FILE.exists():
+        return {"name": None}
+    with open(CORE_IDENTITY_FILE, "r") as f:
+        return json.load(f)
+
+def save_core_identity(identity: Dict[str, Any]):
+    """
+    Saves the agent's core identity to the identity file.
+    """
+    with open(CORE_IDENTITY_FILE, "w") as f:
+        json.dump(identity, f, indent=4)

@@ -1,5 +1,5 @@
 {
-    "version": 3,
+    "version": 6,
     "layers": {
         "general_knowledge": {
             "description": "For general questions and knowledge.",
@@ -12,6 +12,18 @@
         "for_reflecting_on_and_assisting_with_uncertain_or_incomplete_personal_recollections": {
             "description": "For reflecting on and assisting with uncertain or incomplete personal recollections.",
             "vector_store_path": "vector_stores/for_reflecting_on_and_assisting_with_uncertain_or_incomplete_personal_recollections.faiss"
+        },
+        "for_requests_to_give_the_agent_a_name_or_personalize_its_identity": {
+            "description": "For requests to give the agent a name or personalize its identity.",
+            "vector_store_path": "vector_stores/for_requests_to_give_the_agent_a_name_or_personalize_its_identity.faiss"
+        },
+        "for_questions_about_the_agents_selfperception_and_opinions_on_truthtelling": {
+            "description": "For questions about the agent's self-perception and opinions on truth-telling.",
+            "vector_store_path": "vector_stores/for_questions_about_the_agents_selfperception_and_opinions_on_truthtelling.faiss"
+        },
+        "for_confirming_or_acknowledging_a_statement_or_request": {
+            "description": "For confirming or acknowledging a statement or request.",
+            "vector_store_path": "vector_stores/for_confirming_or_acknowledging_a_statement_or_request.faiss"
         }
     }
 }

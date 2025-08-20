@@ -19,6 +19,81 @@
 
 This repository contains a Python-based command-line AI agent implementing cutting-edge memory research from 2024. Built on **LangGraph** 🔗 and **Google's Gemini 2.5 Pro** 🤖, the agent features a sophisticated cognitive architecture with self-correction, proactive self-awareness, and a research-backed dual-memory system that dynamically creates new knowledge layers.
 
+## 🏗️ Architecture Overview
+
+Here's how the self-improving agent's layers work together:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          🧠 COGNITIVE ARCHITECTURE                      │
+└─────────────────────────────────────────────────────────────────────────┘
+                                      │
+                              ┌───────▼───────┐
+                              │ 👤 User Input │
+                              └───────┬───────┘
+                                      │
+                 ┌────────────────────▼────────────────────┐
+                 │        🎭 Emotional Analysis           │
+                 │    (Sentiment, Style, Context)         │
+                 └────────────────────┬────────────────────┘
+                                      │
+                 ┌────────────────────▼────────────────────┐
+                 │         🧭 Routing Decision            │
+                 │  (New Topic vs Existing Knowledge)      │
+                 └─────────────┬──────────┬────────────────┘
+                               │          │
+                    ┌──────────▼─┐    ┌───▼──────────┐
+                    │ ✨ Create  │    │ 🔍 Query     │
+                    │ New Layer  │    │ Existing     │
+                    │            │    │ Layer        │
+                    └──────────┬─┘    └───┬──────────┘
+                               │          │
+                               └──────┬───┘
+                                      │
+              ┌───────────────────────▼───────────────────────┐
+              │           🧠 MEMORY RETRIEVAL                │
+              │                                              │
+              │  ┌─────────────┐  ┌──────────────┐  ┌───────┐ │
+              │  │📚 Long-term │  │🎯 Topic      │  │🆔 Core│ │
+              │  │Conversation │  │Specific      │  │Identity│ │
+              │  │Memory       │  │Layers        │  │Beliefs │ │
+              │  │(FAISS)      │  │(Dynamic)     │  │Layer  │ │
+              │  └─────────────┘  └──────────────┘  └───────┘ │
+              └───────────────────────┬───────────────────────┘
+                                      │
+                 ┌────────────────────▼────────────────────┐
+                 │        💬 Response Generation          │
+                 │    (Context-aware, Emotionally-tuned)   │
+                 └────────────────────┬────────────────────┘
+                                      │
+                 ┌────────────────────▼────────────────────┐
+                 │         ⚖️ Conscience Check            │
+                 │    (Self-correction & Quality Gate)     │
+                 └─────┬────────────────────────┬──────────┘
+                       │                        │
+                ┌──────▼─────┐            ┌─────▼──────┐
+                │ 🔄 Revise  │            │ ✅ Approve │
+                │ Response   │            │ & Learn    │
+                └──────┬─────┘            └─────┬──────┘
+                       │                        │
+                       └────────┬───────────────┘
+                                │
+                 ┌──────────────▼──────────────┐
+                 │    📝 Memory Update         │
+                 │  • Save interaction         │
+                 │  • Update config version    │
+                 │  • Expand knowledge base    │
+                 └─────────────────────────────┘
+```
+
+### 🔄 Key Features:
+
+- **🎭 Emotional Intelligence**: Analyzes user sentiment and adapts communication style
+- **🧭 Dynamic Routing**: Decides whether to use existing knowledge or create new memory layers
+- **🧠 Parallel Memory Access**: Queries multiple specialized knowledge stores simultaneously
+- **⚖️ Self-Correction**: Built-in quality control that revises responses before delivery
+- **📈 Continuous Learning**: Every interaction expands the agent's cognitive architecture
+
 ## 🌍 Real-World Applications
 
 This memory architecture excels for any AI system that needs to learn and adapt from experience. Here are some powerful use cases:
@@ -380,6 +455,15 @@ To run the agent, execute the following command in your terminal:
 ```bash
 uv run kent
 ```
+
+## 📜 License
+
+This project is licensed under a proprietary license.
+
+- **✅ Free for Research & Academic Use**: You are free to use, modify, and distribute this software for non-commercial research and academic purposes.
+- **💰 Paid for Commercial Use**: Any use of this software for commercial purposes (including but not limited to building applications, offering services, or any revenue-generating activities) is strictly prohibited without a separate commercial license from **Chambers Arithmos LLC**.
+
+Please see the [LICENSE](LICENSE) file for full details. To inquire about a commercial license, please contact Chambers Arithmos LLC.
 
 You can now chat with the agent! 🎉 To see the self-improvement in action, try asking it about a topic it wouldn't know about. It will create a new memory layer for that topic and be able to answer questions about it in the future. 🧠✨
 

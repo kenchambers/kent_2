@@ -1,21 +1,45 @@
-MIT License
+Copyright (c) 2024 Chambers Arithmos LLC
 
-Copyright (c) 2025 chowderhead
+All Rights Reserved
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+**Proprietary Software License Agreement**
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+This Software License Agreement ("Agreement") is a legal agreement between you (either an individual or a single entity) and Chambers Arithmos LLC ("Licensor") for the software product "Self-Improving Agent with Advanced Memory Architecture" ("Software").
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+By installing, copying, or otherwise using the Software, you agree to be bound by the terms of this Agreement. If you do not agree to the terms of this Agreement, do not install or use the Software.
+
+**1. Grant of License**
+
+Chambers Arithmos LLC ("Licensor") grants you a non-exclusive, non-transferable license to use the Software under the following conditions:
+
+- **Research and Academic Use:** You may use, modify, and distribute the Software at no cost for non-commercial research and academic purposes only.
+
+- **Commercial Use:** Any use of the Software for commercial purposes is strictly prohibited without a separate, written commercial license agreement from the Licensor. Commercial purposes include, but are not limited to, developing, distributing, or selling products or services that incorporate or derive from the Software, or using the Software for any revenue-generating activities. To obtain a commercial license, please contact Chambers Arithmos LLC.
+
+**2. Restrictions**
+
+You shall not:
+
+- Sublicense, rent, lease, or transfer the Software to any third party without prior written consent from Licensor.
+- Remove or alter any copyright or other proprietary notices on any copies of the Software.
+- Use the Software in any manner that infringes upon the intellectual property rights of Licensor or any third party.
+
+**3. Ownership**
+
+The Software, including all associated intellectual property rights (such as copyright, patents, and trademarks), remains the exclusive property of Licensor. This Agreement does not grant you any ownership rights to the Software.
+
+**4. Termination**
+
+This Agreement is effective until terminated. Licensor reserves the right to terminate this Agreement immediately and without notice if you fail to comply with any term or condition of this Agreement. Upon termination, you must cease all use of the Software and destroy all copies of the Software and all of its component parts.
+
+**5. Disclaimer of Warranties**
+
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE SOFTWARE IS WITH YOU.
+
+**6. Limitation of Liability**
+
+IN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY DAMAGES WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PECUNIARY LOSS) ARISING OUT OF THE USE OF OR INABILITY TO USE THE SOFTWARE, EVEN IF LICENSOR HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+**7. Governing Law**
+
+This Agreement shall be governed by and construed in accordance with the laws of the State of [Your State/Jurisdiction], without regard to its conflict of law principles.

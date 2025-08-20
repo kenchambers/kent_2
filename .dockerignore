@@ -1,0 +1,33 @@
+# Node.js
+frontend/node_modules
+frontend/.next
+frontend/.env*
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+**/env
+**/venv
+**/.venv
+**/pip-log.txt
+**/.coverage
+**/.pytest_cache
+
+# Development files
+.git
+.gitignore
+README.md
+.env*
+*.log
+
+# IDE
+.vscode
+.idea
+**/.DS_Store
+
+# Local data
+conversations.db
+*.sqlite

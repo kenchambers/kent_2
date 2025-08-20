@@ -31,9 +31,8 @@ COPY backend/ ./backend/
 COPY agent_config.json* ./
 COPY conversation_history.json* ./
 
-# Create vector_stores directory and copy if exists  
+# Create vector_stores directory (generated at runtime)
 RUN mkdir -p ./vector_stores/
-COPY vector_stores/ ./vector_stores/
 
 # Copy built frontend from previous stage
 COPY --from=frontend-builder /app/frontend/.next ./frontend/.next

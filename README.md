@@ -40,6 +40,20 @@ The agent's intelligence is not just in its knowledge, but in its awareness of t
 2.  **Proactive Self-Awareness**: Before generating any response, the agent receives a `SELF-AWARENESS CHECK` in its prompt context. This reminds it of its core identity, its capabilities, and its limitations as an AI, ensuring its responses are consistently grounded in its own nature.
 3.  **Reactive Self-Correction (The Conscience)**: After generating a response but _before_ sending it to the user, the agent's `Conscience` module critiques the answer. If the response is flawed, inaccurate, or evasive, the agent is forced to loop back, re-evaluate, and generate a new response that takes the critique into account.
 
+### Emotional Intelligence via an "Emotional Subconscious"
+
+Inspired by the pioneering work of the Seasame team on context-aware conversational AI, this agent now incorporates an "emotional subconscious" to generate more human-like and empathetic responses. This system introduces a new layer to the agent's cognitive processing that analyzes the user's input for emotional and stylistic cues.
+
+Here’s how it works within our system:
+
+1.  **Sentiment Analysis Node**: Before the agent's main cognitive loop begins, a dedicated `analyze_emotion` node processes the user's input. It identifies key emotional indicators, such as sentiment (positive, negative, neutral), specific emotions (joy, curiosity, frustration), and communication style (formal, casual).
+
+2.  **Dynamic State Update**: The emotional analysis is added to the agent's state, making this context available to all subsequent nodes. This allows the agent to maintain an awareness of the user's emotional state throughout the conversation.
+
+3.  **Emotionally-Informed Response Generation**: The final response generation node is prompted to consider this emotional context, allowing it to tailor its tone, style, and word choice to better match the user. This results in conversations that feel more natural, empathetic, and engaging.
+
+This architecture, while text-based, mirrors the principles of Seasame's multimodal approach by integrating a layer of emotional intelligence that runs concurrently with the agent's logical processing.
+
 ### Layered Memory Architecture
 
 The agent's long-term memory is a searchable knowledge base, distinct from its core identity. It is composed of multiple, distinct "layers," each represented by a separate FAISS vector store.

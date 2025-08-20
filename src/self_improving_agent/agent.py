@@ -3,6 +3,7 @@ This module defines the SelfImprovingAgent class, which is the core of the
 self-improving agent.
 """
 import json
+import asyncio
 from typing import TypedDict, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -61,28 +62,160 @@ class SelfImprovingAgent:
             "Admit when you don't know something.",
         ]
 
-    async def _analyze_emotion(self, state: AgentState) -> AgentState:
+    async def _initial_analysis_and_routing(self, state: AgentState) -> AgentState:
         """
-        Analyzes the user's input for emotional tone and communication style.
+        Combines emotional analysis and routing into a single LLM call.
         """
-        log_thinking("--- Analyzing Emotion ---")
+        log_thinking("--- Initial Analysis and Routing ---")
+        past_experiences = memory.query_memory(
+            self.experience_vector_store,
+            state["user_input"]
+        )
+        state["past_experiences"] = past_experiences
+
         prompt = f"""
-        Analyze the emotional tone and communication style of the following user input.
+        Analyze the user's input and determine the next action.
 
         User input: "{state['user_input']}"
 
-        Consider the following aspects:
-        - Sentiment: (e.g., positive, negative, neutral)
-        - Emotion: (e.g., joy, sadness, anger, curiosity, frustration)
-        - Style: (e.g., formal, casual, humorous, direct)
+        Here is the summary of the recent conversation for context:
+        --- RECENT CONVERSATION SUMMARY ---
+        {state['short_term_summary']}
+        --- END RECENT CONVERSATION SUMMARY ---
 
-        Provide a concise, one-sentence summary of the user's emotional and stylistic state.
-        For example: "The user seems curious and is communicating in a casual style."
+        Here are the available memory layers:
+        {json.dumps(self.config['layers'], indent=2)}
+
+        Here are some relevant past experiences:
+        {past_experiences}
+
+        Respond with a JSON object containing two keys:
+        1. "emotional_context": A concise, one-sentence summary of the user's emotional and stylistic state (e.g., "The user seems curious and is communicating in a casual style.").
+        2. "routing_decision": An object with your thought process for routing. It should contain:
+           - "thought": Your reasoning process.
+           - "action": The name of the layer to use, or "new_layer".
+           - "confidence": A percentage of your confidence in this action.
+           - "self_correction_plan": What to do if the action fails.
+
+        Example JSON response:
+        {{
+            "emotional_context": "The user seems curious and is communicating in a casual style.",
+            "routing_decision": {{
+                "thought": "The user is asking about the history of the internet. The 'history_of_technology' layer seems relevant.",
+                "action": "history_of_technology",
+                "confidence": "90%",
+                "self_correction_plan": "If the 'history_of_technology' layer does not have the answer, I will create a new layer called 'history_of_the_internet'."
+            }}
+        }}
         """
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
-        emotional_context = response.content.strip()
-        state["emotional_context"] = emotional_context
-        log_thinking(f"--- Emotional Context: {emotional_context} ---")
+        response_text = response.content.strip()
+
+        try:
+            # Extract JSON from the response, assuming it might be wrapped in markdown
+            if "```json" in response_text:
+                json_str = response_text.split("```json")[1].split("```")[0].strip()
+            else:
+                json_str = response_text[response_text.find('{'):response_text.rfind('}') + 1]
+
+            if not json_str:
+                raise json.JSONDecodeError("No JSON object found in response", response_text, 0)
+
+            parsed_json = json.loads(json_str)
+            emotional_context = parsed_json.get("emotional_context")
+            routing_decision = parsed_json.get("routing_decision")
+
+            state["emotional_context"] = emotional_context
+            log_thinking(f"--- Emotional Context: {emotional_context} ---")
+
+            monologue = json.dumps(routing_decision, indent=2)
+            state["inner_monologue"] = monologue
+            log_thinking(f"--- Inner Monologue ---\n{monologue}")
+
+            action = routing_decision.get("action", "new_layer")
+
+            if action == "new_layer":
+                state["needs_new_layer"] = True
+            else:
+                state["needs_new_layer"] = False
+                state["active_layer"] = action
+
+        except (json.JSONDecodeError, KeyError) as e:
+            log_thinking(f"--- Initial Analysis: Invalid JSON from LLM --- \nLLM Response: '{response_text}'\nError: {e}")
+            # Fallback or error handling logic here
+            state["needs_new_layer"] = True # Default to creating a new layer on failure
+            state["emotional_context"] = "Could not determine emotional context."
+
+        return state
+
+    async def _get_dynamic_memory(self, user_input: str) -> str:
+        """Helper to retrieve from long-term conversational memory."""
+        log_thinking("--- Querying Long-Term Conversational Memory ---")
+        return memory.query_memory(self.long_term_memory, user_input)
+
+    async def _get_core_beliefs(self, user_input: str) -> List[str]:
+        """Helper to retrieve from core belief layers."""
+        retrieved_beliefs = []
+        for key, value in self.core_identity.items():
+            if key.endswith("_layer"):
+                layer_name = value
+                if layer_name in self.config["layers"]:
+                    log_thinking(f"--- Checking Core Beliefs Layer: {layer_name} ---")
+                    layer_config = self.config["layers"][layer_name]
+                    vector_store = memory.get_vector_store(
+                        layer_config["vector_store_path"]
+                    )
+                    retrieved_info = memory.query_memory(vector_store, user_input)
+                    log_thinking(f"--- Retrieved Belief: {retrieved_info} ---")
+                    retrieved_beliefs.append(retrieved_info)
+        return retrieved_beliefs
+
+    async def _get_existing_layer_info(self, layer_name: str, user_input: str) -> Optional[str]:
+        """Helper to retrieve from an existing layer."""
+        if layer_name and layer_name in self.config["layers"]:
+            log_thinking(f"--- Checking Memory Layer: {layer_name} ---")
+            layer_config = self.config["layers"][layer_name]
+            vector_store = memory.get_vector_store(layer_config["vector_store_path"])
+            retrieved_info = memory.query_memory(vector_store, user_input)
+            log_thinking(f"--- Retrieved Info: {retrieved_info} ---")
+            return retrieved_info
+        return None
+
+    async def _parallel_memory_retrieval(self, state: AgentState) -> AgentState:
+        """
+        Retrieves information from various memory sources in parallel.
+        """
+        log_thinking("--- Parallel Memory Retrieval ---")
+        user_input = state["user_input"]
+        active_layer = state.get("active_layer")
+
+        tasks = {
+            "dynamic": self._get_dynamic_memory(user_input),
+            "beliefs": self._get_core_beliefs(user_input),
+        }
+
+        if active_layer and not state["needs_new_layer"]:
+            tasks["layer_info"] = self._get_existing_layer_info(active_layer, user_input)
+
+        # Use asyncio.gather to run all tasks concurrently
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        
+        results_map = dict(zip(tasks.keys(), results))
+
+        for task_name, result in results_map.items():
+            if isinstance(result, Exception):
+                log_thinking(f"--- Error during {task_name} retrieval: {result} ---")
+                continue
+
+            if task_name == "dynamic" and result:
+                state["episodic_buffer"].append(result)
+                log_thinking(f"--- Retrieved from Long-Term Memory: {result} ---")
+            elif task_name == "beliefs" and result:
+                state["episodic_buffer"].extend(result)
+            elif task_name == "layer_info" and active_layer and result:
+                state["layer_info"][active_layer] = result
+                state["episodic_buffer"].append(result)
+
         return state
 
     def _build_graph(self):
@@ -91,44 +224,38 @@ class SelfImprovingAgent:
         """
         workflow = StateGraph(AgentState)
 
-        workflow.add_node("analyze_emotion", self._analyze_emotion)
-        workflow.add_node("inner_monologue", self._inner_monologue)
-        workflow.add_node("query_existing_layer", self._query_existing_layer)
+        workflow.add_node(
+            "initial_analysis_and_routing", self._initial_analysis_and_routing
+        )
+        workflow.add_node(
+            "parallel_memory_retrieval", self._parallel_memory_retrieval
+        )
         workflow.add_node("propose_new_layer", self._propose_new_layer)
         workflow.add_node("create_new_layer", self._create_new_layer)
         workflow.add_node("conscience", self._conscience)
         workflow.add_node("generate_response", self._generate_response)
         workflow.add_node("update_memory", self._update_memory)
-
         workflow.add_node(
             "_update_short_term_summary", self._update_short_term_summary
         )
-        workflow.add_node(
-            "_dynamic_memory_retrieval", self._dynamic_memory_retrieval
-        )
-        workflow.add_node("update_episodic_buffer", self._update_episodic_buffer)
         workflow.add_node("query_semantic_cache", self._query_semantic_cache)
         workflow.add_node("update_core_identity", self._update_core_identity)
-        workflow.add_node("_query_core_beliefs", self._query_core_beliefs)
 
-        workflow.set_entry_point("analyze_emotion")
+        workflow.set_entry_point("initial_analysis_and_routing")
 
-        workflow.add_edge("analyze_emotion", "inner_monologue")
-        workflow.add_edge("inner_monologue", "_dynamic_memory_retrieval")
-        workflow.add_edge("_dynamic_memory_retrieval", "_query_core_beliefs")
+        workflow.add_edge("initial_analysis_and_routing", "parallel_memory_retrieval")
 
         workflow.add_conditional_edges(
-            "_query_core_beliefs",
+            "parallel_memory_retrieval",
             lambda state: "propose_new_layer"
             if state["needs_new_layer"]
-            else "query_existing_layer",
+            else "query_semantic_cache",
         )
-        workflow.add_edge("query_existing_layer", "update_episodic_buffer")
         workflow.add_edge("propose_new_layer", "create_new_layer")
-        workflow.add_edge("create_new_layer", "query_existing_layer")
-        workflow.add_edge("update_episodic_buffer", "query_semantic_cache")
+        workflow.add_edge("create_new_layer", "query_semantic_cache")
         workflow.add_edge("query_semantic_cache", "generate_response")
         workflow.add_edge("generate_response", "conscience")
+
         workflow.add_conditional_edges(
             "conscience",
             lambda state: "generate_response"
@@ -164,160 +291,6 @@ class SelfImprovingAgent:
             "--- Short-Term Summary Updated: "
             f"{state['short_term_summary']} ---"
         )
-        return state
-
-    async def _dynamic_memory_retrieval(self, state: AgentState) -> AgentState:
-        """
-        Retrieves relevant memories from the long-term conversational memory.
-        """
-        retrieved_memories = memory.query_memory(
-            state["long_term_memory"],
-            state["user_input"]
-        )
-        state["episodic_buffer"].append(retrieved_memories)
-        log_thinking(
-            "--- Retrieved from Long-Term Memory: "
-            f"{retrieved_memories} ---"
-        )
-        return state
-
-    async def _query_core_beliefs(self, state: AgentState) -> AgentState:
-        """
-        Queries the core beliefs layers for relevant information.
-        """
-        for key, value in state["core_identity"].items():
-            if key.endswith("_layer"):
-                layer_name = value
-                if layer_name in self.config["layers"]:
-                    log_thinking(f"--- Checking Core Beliefs Layer: {layer_name} ---")
-                    layer_config = self.config["layers"][layer_name]
-                    vector_store = memory.get_vector_store(
-                        layer_config["vector_store_path"]
-                    )
-                    retrieved_info = memory.query_memory(
-                        vector_store,
-                        state["user_input"]
-                    )
-                    log_thinking(f"--- Retrieved Belief: {retrieved_info} ---")
-                    state["episodic_buffer"].append(retrieved_info)
-        return state
-
-    async def _inner_monologue(self, state: AgentState) -> AgentState:
-        """
-        The inner monologue of the agent.
-        """
-        log_thinking("--- Inner Monologue ---")
-        past_experiences = memory.query_memory(
-            self.experience_vector_store,
-            state["user_input"]
-        )
-        state["past_experiences"] = past_experiences
-
-        prompt = f"""
-        You are a routing agent. Your job is to determine if the user's request
-        can be answered by one of the existing memory layers, or if a new
-        layer is needed.
-
-        Here is the summary of the recent conversation for context:
-        --- RECENT CONVERSATION SUMMARY ---
-        {state['short_term_summary']}
-        --- END RECENT CONVERSATION SUMMARY ---
-
-        The user's latest request is: "{state['user_input']}"
-
-        Here are the available layers:
-        {json.dumps(self.config['layers'], indent=2)}
-
-        Here are some relevant past experiences:
-        {past_experiences}
-
-        Based on the user's request, recent conversation summary, and past experiences, generate a structured
-        "thought" string.
-        Your thought process should include the following:
-        - **Thought:** Your reasoning process.
-        - **Action:** The name of the layer to use, or "new_layer".
-        - **Confidence:** A percentage of your confidence in this action.
-        - **Self-Correction Plan:** What to do if the action fails.
-
-        Example:
-        Thought: The user is asking about the history of the internet. The
-        "history_of_technology" layer seems relevant.
-        Action: history_of_technology
-        Confidence: 90%
-        Self-Correction Plan: If the "history_of_technology" layer does not
-        have the answer, I will create a new layer called
-        "history_of_the_internet".
-        """
-        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
-        monologue = response.content.strip()
-        state["inner_monologue"] = monologue
-        log_thinking(monologue)
-
-        # Extract the action from the monologue
-        action = "new_layer"
-        for line in monologue.split("\n"):
-            if line.lower().startswith("action:"):
-                action = line.split(":", 1)[1].strip()
-                break
-
-        if action == "new_layer":
-            state["needs_new_layer"] = True
-        else:
-            state["needs_new_layer"] = False
-            state["active_layer"] = action
-
-        return state
-
-    async def _route_request(self, state: AgentState) -> AgentState:
-        prompt = f"""
-        You are a routing agent. Your job is to determine if the user's request
-        can be answered by one of the existing memory layers, or if a new
-        layer is needed.
-
-        The user's request is: "{state['user_input']}"
-
-        Here are the available layers:
-        {json.dumps(self.config['layers'], indent=2)}
-
-        Does the user's request fit into one of the existing layers?
-        If yes, respond with ONLY the name of the layer (e.g.,
-        'general_knowledge').
-        If no, respond with ONLY the word "new_layer".
-        """
-        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
-        decision = response.content.strip()
-
-        if decision == "new_layer":
-            state["needs_new_layer"] = True
-        else:
-            state["needs_new_layer"] = False
-            state["active_layer"] = decision
-
-        return state
-
-    async def _query_existing_layer(self, state: AgentState) -> AgentState:
-        layer_name = state["active_layer"]
-        if layer_name and layer_name in self.config["layers"]:
-            log_thinking(f"--- Checking Memory Layer: {layer_name} ---")
-            layer_config = self.config["layers"][layer_name]
-            vector_store = memory.get_vector_store(
-                layer_config["vector_store_path"]
-            )
-            retrieved_info = memory.query_memory(
-                vector_store,
-                state["user_input"]
-            )
-            log_thinking(f"--- Retrieved Info: {retrieved_info} ---")
-            state["layer_info"][layer_name] = retrieved_info
-        return state
-
-
-
-    async def _update_episodic_buffer(self, state: AgentState) -> AgentState:
-        # Placeholder for more complex logic
-        if state["active_layer"] and state["layer_info"]:
-            retrieved_info = state["layer_info"][state["active_layer"]]
-            state["episodic_buffer"].append(retrieved_info)
         return state
 
     async def _query_semantic_cache(self, state: AgentState) -> AgentState:

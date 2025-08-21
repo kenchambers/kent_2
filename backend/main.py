@@ -519,12 +519,14 @@ async def chat_stream(message: ChatMessage):
     """Streaming chat endpoint with real thinking process."""
     thinking_queue = asyncio.Queue()
     
+    # Get the current event loop at the start of the request
+    current_loop = asyncio.get_running_loop()
+    
     def thinking_callback(thinking_message: str):
         """Callback to capture thinking logs from agent."""
         try:
-            # Use asyncio.create_task to put item in queue from sync context
-            loop = asyncio.get_event_loop()
-            loop.call_soon_threadsafe(thinking_queue.put_nowait, thinking_message)
+            # Use the captured loop reference to safely add to queue from any thread
+            current_loop.call_soon_threadsafe(thinking_queue.put_nowait, thinking_message)
         except Exception as e:
             print(f"Error in thinking callback: {e}")
     

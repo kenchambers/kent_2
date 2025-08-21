@@ -5,13 +5,14 @@ from pathlib import Path
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.docstore.document import Document
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from . import config
 
 
-def get_vector_store(path: str) -> FAISS:
+def get_vector_store(path: str, initial_documents: Optional[List[Document]] = None) -> FAISS:
     """
     Loads or creates a vector store at the given path.
+    If creating a new store, it can be seeded with initial documents.
     """
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/embedding-001",
@@ -24,9 +25,10 @@ def get_vector_store(path: str) -> FAISS:
             allow_dangerous_deserialization=True
         )
 
-    # Create a new, empty vector store
-    dummy_doc = [Document(page_content="initial document")]
-    vector_store = FAISS.from_documents(dummy_doc, embeddings)
+    # If no initial documents are provided, use a default dummy document
+    # to ensure the vector store is created correctly.
+    documents_to_add = initial_documents if initial_documents else [Document(page_content="initial document")]
+    vector_store = FAISS.from_documents(documents_to_add, embeddings)
     vector_store.save_local(path)
     return vector_store
 
@@ -40,13 +42,12 @@ def get_experience_vector_store() -> FAISS:
     )
 
 
-def add_to_memory(vector_store: FAISS, text: str, path: str, metadata: Dict[str, Any] = None):
+def add_to_memory(vector_store: FAISS, text: str, path: str, metadata: Optional[Dict[str, Any]] = None):
     """
-    Adds a new piece of text to the vector store and saves it.
+    Adds a text to the vector store and saves it.
     """
-    # FAISS expects a list of documents and a corresponding list of metadatas
-    docs = [Document(page_content=text, metadata=metadata or {})]
-    vector_store.add_documents(docs)
+    # FAISS does not support in-place additions well, so we add and re-save.
+    vector_store.add_documents([Document(page_content=text, metadata=metadata or {})])
     vector_store.save_local(path)
 
 

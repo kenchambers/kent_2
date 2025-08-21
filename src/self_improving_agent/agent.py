@@ -704,16 +704,11 @@ class SelfImprovingAgent:
             ),
         }
 
-        # Create the new vector store
-        vector_store = memory.get_vector_store(
-            new_layer_config["vector_store_path"]
-        )
-
-        # Add the initial user input as a foundational memory
-        memory.add_to_memory(
-            vector_store,
-            state["user_input"],
-            new_layer_config["vector_store_path"]
+        # Create the new vector store with the user's input as the first document.
+        initial_doc = Document(page_content=state["user_input"])
+        memory.get_vector_store(
+            new_layer_config["vector_store_path"],
+            initial_documents=[initial_doc]
         )
 
         # Update and save the configuration

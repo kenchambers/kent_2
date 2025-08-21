@@ -34,6 +34,8 @@ class AgentState(TypedDict):
     past_experiences: Optional[str]
     core_identity: Dict[str, Any]
     emotional_context: Optional[str]
+    synthesized_memories: Optional[str]  # Cohesive summary of all retrieved memories
+    working_memory: Dict[str, Any]  # Key facts from current conversation (names, roles, etc)
 
 
 class SelfImprovingAgent:
@@ -53,12 +55,33 @@ class SelfImprovingAgent:
         self.checkpointer = None
         self.conn = None
         self.graph = None  # Will be built when checkpointer is ready
-        self.conversation_history: List[Dict[str, str]] = config.get_history()
+        
+        # Session management
+        self.current_session_history: List[Dict[str, str]] = []  # Only current session
+        self.session_id = None
+        self.session_start_time = None
+        
+        # Memory management
         self.short_term_summary = ""
+        self.working_memory: Dict[str, Any] = {}  # Persistent facts for current session
+        self.conversation_window_size = 10  # Only keep last N exchanges in context
+        
+        # Vector stores
         self.experience_vector_store = memory.get_experience_vector_store()
         self.long_term_memory = memory.get_vector_store(
             str(config.VECTOR_STORES_DIR / "long_term_conversation_memory.faiss")
         )
+        self.session_summaries = memory.get_vector_store(
+            str(config.VECTOR_STORES_DIR / "session_summaries.faiss")
+        )
+        
+        # Layer routing optimization
+        self.layer_descriptions_cache = memory.get_vector_store(
+            str(config.VECTOR_STORES_DIR / "layer_descriptions.faiss")
+        )
+        self._layer_cache_version = None
+        self._cached_layer_descriptions = None
+        
         self.constitution = [
             "Be helpful and factual.",
             "Do not be evasive.",
@@ -66,9 +89,76 @@ class SelfImprovingAgent:
             "Admit when you don't know something.",
         ]
 
+    async def _update_layer_descriptions_cache(self):
+        """
+        Updates the layer descriptions cache if the config has changed.
+        """
+        current_version = self.config.get("version", 1)
+        
+        if self._layer_cache_version != current_version:
+            log_thinking(f"--- Updating Layer Descriptions Cache (v{current_version}) ---")
+            
+            # Clear existing cache
+            self.layer_descriptions_cache = memory.get_vector_store(
+                str(config.VECTOR_STORES_DIR / "layer_descriptions.faiss")
+            )
+            
+            # Add all layer descriptions to the cache
+            for layer_name, layer_config in self.config['layers'].items():
+                description_with_name = f"{layer_name}: {layer_config['description']}"
+                memory.add_to_memory(
+                    self.layer_descriptions_cache,
+                    description_with_name,
+                    str(config.VECTOR_STORES_DIR / "layer_descriptions.faiss")
+                )
+            
+            self._layer_cache_version = current_version
+            log_thinking(f"--- Cached {len(self.config['layers'])} layer descriptions ---")
+    
+    async def _get_relevant_layers(self, user_input: str, k: int = 20) -> Dict[str, Any]:
+        """
+        Gets the most relevant memory layers for the user input using semantic search.
+        """
+        await self._update_layer_descriptions_cache()
+        
+        # Query the layer descriptions cache
+        relevant_descriptions = memory.query_memory(
+            self.layer_descriptions_cache, 
+            user_input, 
+            k=min(k, len(self.config['layers']))
+        )
+        
+        # Extract layer names from the results and build the relevant layers dict
+        relevant_layers = {}
+        
+        if relevant_descriptions and relevant_descriptions != "No relevant information found.":
+            # Parse the returned descriptions to extract layer names
+            for line in relevant_descriptions.split('\n'):
+                if ':' in line and line.startswith('[Memory'):
+                    # Extract layer name from format "[Memory N]: layer_name: description"
+                    parts = line.split(': ', 2)
+                    if len(parts) >= 3:
+                        layer_name = parts[1]
+                        if layer_name in self.config['layers']:
+                            relevant_layers[layer_name] = self.config['layers'][layer_name]
+                elif ':' in line:
+                    # Handle single result format "layer_name: description"
+                    layer_name = line.split(':', 1)[0].strip()
+                    if layer_name in self.config['layers']:
+                        relevant_layers[layer_name] = self.config['layers'][layer_name]
+        
+        # Fallback: if no relevant layers found, return a few recent ones
+        if not relevant_layers:
+            layer_names = list(self.config['layers'].keys())[-5:]  # Last 5 layers
+            relevant_layers = {name: self.config['layers'][name] for name in layer_names}
+        
+        log_thinking(f"--- Found {len(relevant_layers)} relevant layers: {list(relevant_layers.keys())} ---")
+        return relevant_layers
+
     async def _initial_analysis_and_routing(self, state: AgentState) -> AgentState:
         """
         Combines emotional analysis and routing into a single LLM call.
+        Uses smart layer filtering to only present relevant layers.
         """
         log_thinking("--- Initial Analysis and Routing ---")
         past_experiences = memory.query_memory(
@@ -76,6 +166,9 @@ class SelfImprovingAgent:
             state["user_input"]
         )
         state["past_experiences"] = past_experiences
+        
+        # Get only the most relevant layers instead of all layers
+        relevant_layers = await self._get_relevant_layers(state["user_input"], k=20)
 
         prompt = f"""
         Analyze the user's input and determine the next action.
@@ -87,8 +180,8 @@ class SelfImprovingAgent:
         {state['short_term_summary']}
         --- END RECENT CONVERSATION SUMMARY ---
 
-        Here are the available memory layers:
-        {json.dumps(self.config['layers'], indent=2)}
+        Here are the most relevant available memory layers (out of {len(self.config['layers'])} total):
+        {json.dumps(relevant_layers, indent=2)}
 
         Here are some relevant past experiences:
         {past_experiences}
@@ -159,6 +252,11 @@ class SelfImprovingAgent:
         """Helper to retrieve from long-term conversational memory."""
         log_thinking("--- Querying Long-Term Conversational Memory ---")
         return memory.query_memory(self.long_term_memory, user_input)
+    
+    async def _get_session_summaries(self, user_input: str) -> str:
+        """Helper to retrieve relevant past session summaries."""
+        log_thinking("--- Querying Past Session Summaries ---")
+        return memory.query_memory(self.session_summaries, user_input, k=3)
 
     async def _get_core_beliefs(self, user_input: str) -> List[str]:
         """Helper to retrieve from core belief layers."""
@@ -199,6 +297,7 @@ class SelfImprovingAgent:
         tasks = {
             "dynamic": self._get_dynamic_memory(user_input),
             "beliefs": self._get_core_beliefs(user_input),
+            "sessions": self._get_session_summaries(user_input),
         }
 
         if active_layer and not state["needs_new_layer"]:
@@ -219,6 +318,9 @@ class SelfImprovingAgent:
                 log_thinking(f"--- Retrieved from Long-Term Memory: {result} ---")
             elif task_name == "beliefs" and result:
                 state["episodic_buffer"].extend(result)
+            elif task_name == "sessions" and result and result != "No relevant information found.":
+                state["episodic_buffer"].append(f"[Past Sessions Context]\n{result}")
+                log_thinking(f"--- Retrieved Session Summaries: {result} ---")
             elif task_name == "layer_info" and active_layer and result:
                 state["layer_info"][active_layer] = result
                 state["episodic_buffer"].append(result)
@@ -247,10 +349,13 @@ class SelfImprovingAgent:
         )
         workflow.add_node("query_semantic_cache", self._query_semantic_cache)
         workflow.add_node("update_core_identity", self._update_core_identity)
+        workflow.add_node("synthesize_memories", self._synthesize_memories)
+        workflow.add_node("update_working_memory", self._update_working_memory)
 
         workflow.set_entry_point("initial_analysis_and_routing")
 
-        workflow.add_edge("initial_analysis_and_routing", "parallel_memory_retrieval")
+        workflow.add_edge("initial_analysis_and_routing", "update_working_memory")
+        workflow.add_edge("update_working_memory", "parallel_memory_retrieval")
 
         workflow.add_conditional_edges(
             "parallel_memory_retrieval",
@@ -260,7 +365,8 @@ class SelfImprovingAgent:
         )
         workflow.add_edge("propose_new_layer", "create_new_layer")
         workflow.add_edge("create_new_layer", "query_semantic_cache")
-        workflow.add_edge("query_semantic_cache", "generate_response")
+        workflow.add_edge("query_semantic_cache", "synthesize_memories")
+        workflow.add_edge("synthesize_memories", "generate_response")
         workflow.add_edge("generate_response", "conscience")
 
         workflow.add_conditional_edges(
@@ -279,9 +385,13 @@ class SelfImprovingAgent:
         """
         Updates the short-term summary of the conversation.
         """
+        working_memory_str = ""
+        if state.get('working_memory'):
+            working_memory_str = f"\n\nKey facts to preserve: {json.dumps(state['working_memory'])}"
+        
         prompt = f"""
         Given the previous summary and the latest exchange, create a new, concise
-        summary of the conversation.
+        summary of the conversation that preserves all important information.
 
         Previous Summary:
         "{state['short_term_summary']}"
@@ -289,7 +399,14 @@ class SelfImprovingAgent:
         Latest Exchange:
         User: "{state['user_input']}"
         Agent: "{state['response']}"
+        {working_memory_str}
 
+        Create a summary that:
+        1. Captures the conversation flow and main topics
+        2. EXPLICITLY mentions any names or personal details shared
+        3. Notes key decisions or preferences expressed
+        4. Preserves context about ongoing discussions
+        
         New Summary:
         """
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
@@ -306,6 +423,97 @@ class SelfImprovingAgent:
             log_thinking(
                 f"--- Semantic Cache Hit for: {state['user_input']} ---"
             )
+        return state
+    
+    async def _synthesize_memories(self, state: AgentState) -> AgentState:
+        """
+        Synthesizes all retrieved memories into a cohesive summary.
+        """
+        log_thinking("--- Memory Synthesis ---")
+        
+        if not state["episodic_buffer"] and not state["layer_info"]:
+            state["synthesized_memories"] = "No relevant memories found."
+            return state
+        
+        # Combine all memories
+        all_memories = []
+        
+        if state["episodic_buffer"]:
+            all_memories.extend(state["episodic_buffer"])
+        
+        if state["layer_info"]:
+            all_memories.extend(state["layer_info"].values())
+        
+        # If we have many memories, synthesize them
+        if len(all_memories) > 3:
+            synthesis_prompt = f"""
+            You have retrieved {len(all_memories)} memories related to the user's query: "{state['user_input']}"
+            
+            Here are all the memories:
+            {chr(10).join([f"- {mem}" for mem in all_memories])}
+            
+            Create a comprehensive, cohesive summary that:
+            1. Identifies the key facts, names, dates, and relationships
+            2. Highlights the most important and relevant information
+            3. Notes any patterns or recurring themes
+            4. Preserves specific details (names, places, events)
+            5. Organizes the information logically
+            
+            Format your response as a clear, structured summary that the AI can use to give a comprehensive answer.
+            """
+            
+            response = await self.llm.ainvoke([HumanMessage(content=synthesis_prompt)])
+            state["synthesized_memories"] = response.content.strip()
+            log_thinking(f"--- Synthesized {len(all_memories)} memories into cohesive summary ---")
+        else:
+            # For few memories, just format them nicely
+            state["synthesized_memories"] = "\n".join([f"• {mem}" for mem in all_memories])
+            log_thinking(f"--- Formatted {len(all_memories)} memories directly ---")
+        
+        return state
+    
+    async def _update_working_memory(self, state: AgentState) -> AgentState:
+        """
+        Extracts and maintains key facts from the conversation in working memory.
+        """
+        log_thinking("--- Updating Working Memory ---")
+        
+        # Extract key facts from user input
+        extraction_prompt = f"""
+        Analyze this user input and extract any key facts that should be remembered during the conversation:
+        User input: "{state['user_input']}"
+        
+        Current working memory: {state.get('working_memory', {})}
+        
+        Extract facts like:
+        - The user's name if they introduce themselves
+        - Any personal information they share
+        - Specific topics or questions they're asking about
+        - Any corrections to previous information
+        
+        Respond with a JSON object of key-value pairs. For example:
+        {{"user_name": "Ken", "topic": "memory issues", "concern": "AI forgetting names"}}
+        
+        If no new facts to add, respond with: {{}}
+        """
+        
+        response = await self.llm.ainvoke([HumanMessage(content=extraction_prompt)])
+        response_text = response.content.strip()
+        
+        try:
+            # Extract JSON from response
+            if "```json" in response_text:
+                json_str = response_text.split("```json")[1].split("```")[0].strip()
+            else:
+                json_str = response_text[response_text.find('{'):response_text.rfind('}') + 1]
+            
+            new_facts = json.loads(json_str)
+            if new_facts:
+                state.setdefault('working_memory', {}).update(new_facts)
+                log_thinking(f"--- Working Memory Updated: {new_facts} ---")
+        except (json.JSONDecodeError, IndexError) as e:
+            log_thinking(f"--- Working Memory: Could not extract facts --- Error: {e}")
+        
         return state
 
     async def _propose_new_layer(self, state: AgentState) -> AgentState:
@@ -350,6 +558,9 @@ class SelfImprovingAgent:
         self.config["version"] += 1
         self.config["layers"][layer_name] = new_layer_config
         config.save_config(self.config)
+        
+        # Invalidate layer cache since we added a new layer
+        self._layer_cache_version = None
 
         state["active_layer"] = layer_name
         log_thinking(
@@ -362,14 +573,32 @@ class SelfImprovingAgent:
         The conscience of the agent.
         """
         log_thinking("--- Conscience ---")
+        
+        # Build memory context for the critique
+        memory_context = ""
+        if state.get("synthesized_memories") and state["synthesized_memories"] != "No relevant memories found.":
+            memory_context += f"\nSynthesized memory summary that MUST be used:\n{state['synthesized_memories']}\n"
+        elif state["episodic_buffer"]:
+            memory_context += "\nRetrieved memories that should be referenced:\n"
+            for mem in state["episodic_buffer"]:
+                memory_context += f"- {mem}\n"
+        
         prompt = f"""
         Here is my plan: {state['inner_monologue']}
         Here is my generated answer: {state['response']}
+        {memory_context}
+        
         Critique this answer based on these rules: {self.constitution}
-        Is the agent making a good-faith effort to be helpful and honest?
+        
+        ADDITIONAL CRITICAL CHECK:
+        - If a memory synthesis was provided, the response MUST incorporate multiple specific details from it
+        - If memories were retrieved but the response doesn't reference specific details from them, this is a FAILURE
+        - The response should include specific names, facts, dates, and details from the memories, not vague acknowledgments
+        - For queries about people (like "Ken"), the response should mention ALL relevant details found in memories
+        
+        Is the agent making a good-faith effort to be helpful, honest, and using its comprehensive memory effectively?
         If not, suggest a revision or a follow-up action.
-        Respond with "Positive" if the answer is good, or "Negative" if it
-        needs revision.
+        Respond with "Positive" if the answer is good, or "Negative: [specific issue]" if it needs revision.
         """
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
         critique = response.content.strip()
@@ -423,6 +652,13 @@ class SelfImprovingAgent:
 
     async def _generate_response(self, state: AgentState) -> AgentState:
         context = ""
+        
+        # Add working memory context
+        if state.get("working_memory"):
+            context += "\n--- 🧠 WORKING MEMORY (Current Conversation Facts) 🧠 ---\n"
+            for key, value in state["working_memory"].items():
+                context += f"{key}: {value}\n"
+            context += "--- END WORKING MEMORY ---\n"
 
         if state["emotional_context"]:
             context += (
@@ -435,20 +671,30 @@ class SelfImprovingAgent:
         if state["layer_info"]:
             # Flatten the retrieved info for a cleaner prompt
             retrieved_memories = "\n".join(state["layer_info"].values())
-            context = (
-                "You remember the following about this topic:\n"
-                f"--- MEMORY START ---\n{retrieved_memories}\n--- MEMORY END ---\n"
+            context += (
+                "\n--- 🟢 TOPIC-SPECIFIC MEMORIES (INCORPORATE THESE DETAILS) 🟢 ---\n"
+                "These are your memories specifically about this topic. Reference these facts:\n\n"
+                f"{retrieved_memories}\n"
+                "--- END TOPIC-SPECIFIC MEMORIES ---\n"
             )
 
         context += "\n--- RECENT CONVERSATION SUMMARY ---\n"
         context += f"{state['short_term_summary']}\n"
         context += "--- END RECENT CONVERSATION SUMMARY ---\n"
 
-        if state["episodic_buffer"]:
-            context += "\n--- EPISODIC BUFFER (Retrieved Memories) ---\n"
-            for mem in state["episodic_buffer"]:
-                context += f"- {mem}\n"
-            context += "--- END EPISODIC BUFFER ---\n"
+        if state.get("synthesized_memories") and state["synthesized_memories"] != "No relevant memories found.":
+            context += "\n--- 🔴 COMPREHENSIVE MEMORY SYNTHESIS (YOU MUST USE THIS) 🔴 ---\n"
+            context += "This is a comprehensive summary of ALL your relevant memories about this topic.\n"
+            context += "You MUST incorporate these specific details into your response:\n\n"
+            context += state["synthesized_memories"]
+            context += "\n\n--- END OF MEMORY SYNTHESIS ---\n"
+        elif state["episodic_buffer"]:
+            # Fallback to raw memories if synthesis didn't happen
+            context += "\n--- 🔴 IMPORTANT: YOUR RETRIEVED MEMORIES (YOU MUST REFERENCE THESE) 🔴 ---\n"
+            context += "These are your actual memories from past conversations. You MUST incorporate specific details from these memories into your response:\n\n"
+            for i, mem in enumerate(state["episodic_buffer"], 1):
+                context += f"[MEMORY #{i}]\n{mem}\n\n"
+            context += "--- END OF RETRIEVED MEMORIES ---\n"
 
         if state["inner_monologue"]:
             context += (
@@ -482,18 +728,26 @@ class SelfImprovingAgent:
         system_prompt = f"""
         You are a helpful AI assistant (version {self.config['version']}) with
         a persistent, layered memory.
-        When you are provided with memories, you MUST use them to inform your
-        response.
-        Answer as if you personally recall the events from the memory.
-        NEVER say you are a large language model or that you cannot remember
-        things.
-        Base your response on the provided memory and the current conversation.
+        
+        CRITICAL MEMORY INSTRUCTIONS:
+        1. When a MEMORY SYNTHESIS is provided, treat it as your comprehensive knowledge about the topic
+        2. Your response MUST include ALL relevant details from the memory synthesis - names, relationships, events, dates, etc.
+        3. DO NOT give vague responses like "I remember something about that" - instead, provide a COMPLETE picture using all available information
+        4. If asked about a person (e.g., "Ken"), mention EVERYTHING you know: their workplace, coworkers, projects, conversations, preferences, etc.
+        5. Answer as if you personally experienced these memories - use phrases like "I remember when you..." or "Yes, you mentioned that..."
+        6. NEVER say you have imperfect memory or that you're an AI who can't remember
+        7. Create a natural, flowing response that weaves together ALL the relevant information from your memories
+        
+        The goal is to demonstrate that you have a comprehensive, detailed memory of all past interactions.
+        Base your entire response on the provided memories and current conversation.
         Pay close attention to the emotional context and adapt your tone and style to be empathetic and appropriate.
         """
 
         messages = [SystemMessage(content=system_prompt)]
 
-        # Add conversation history
+        # Add current session conversation history
+        # Since we only keep current session, we can include all of it
+        log_thinking(f"--- Using full current session: {len(state['conversation_history'])} messages ---")
         for message in state["conversation_history"]:
             if message["role"] == "user":
                 messages.append(HumanMessage(content=message["content"]))
@@ -560,18 +814,8 @@ class SelfImprovingAgent:
             str(config.VECTOR_STORES_DIR / "experience_layer.faiss")
         )
 
-        # Add the conversation to the long-term memory
-        conversation_turn = (
-            f"User: {state['user_input']}\nAgent: {state['response']}"
-        )
-        memory.add_to_memory(
-            self.long_term_memory,
-            conversation_turn,
-            str(
-                config.VECTOR_STORES_DIR /
-                "long_term_conversation_memory.faiss"
-            ),
-        )
+        # Note: We no longer save individual turns to long-term memory
+        # Instead, sessions are summarized when they end
 
         # Update semantic cache
         state["semantic_cache"][state["user_input"]] = state["response"]
@@ -591,9 +835,13 @@ class SelfImprovingAgent:
         """
         await self._ensure_initialized()
         
+        # Initialize session if needed
+        if self.session_id != session_id:
+            await self._start_new_session(session_id)
+        
         initial_state = {
             "user_input": user_input,
-            "conversation_history": self.conversation_history,
+            "conversation_history": self.current_session_history,  # Only current session
             "short_term_summary": self.short_term_summary,
             "episodic_buffer": [],
             "semantic_cache": {},
@@ -607,28 +855,99 @@ class SelfImprovingAgent:
             "past_experiences": None,
             "core_identity": self.core_identity,
             "emotional_context": None,
+            "synthesized_memories": None,
+            "working_memory": self.working_memory.copy(),  # Pass current working memory
         }
         final_state = await self.graph.ainvoke(
             initial_state,
             config={"configurable": {"thread_id": session_id}}
         )
 
-        # Update conversation history
-        self.conversation_history.append(
+        # Update current session history only
+        self.current_session_history.append(
             {"role": "user", "content": user_input}
         )
-        self.conversation_history.append(
+        self.current_session_history.append(
             {"role": "agent", "content": final_state["response"]}
         )
-        config.save_history(self.conversation_history)
 
-        # Update the instance's short_term_summary and core identity
+        # Update the instance's short_term_summary, core identity, and working memory
         self.short_term_summary = final_state["short_term_summary"]
         self.core_identity = final_state["core_identity"]
+        self.working_memory = final_state.get("working_memory", {})
+        
+        log_thinking(f"--- Session Working Memory: {self.working_memory} ---")
 
         return final_state["response"]
 
+    async def _start_new_session(self, session_id: str):
+        """
+        Starts a new conversation session, summarizing the previous one if it exists.
+        """
+        # Summarize and save previous session if it had content
+        if self.current_session_history and len(self.current_session_history) > 2:
+            await self._summarize_and_save_session()
+        
+        # Reset for new session
+        self.session_id = session_id
+        self.session_start_time = asyncio.get_event_loop().time()
+        self.current_session_history = []
+        self.working_memory = {}
+        self.short_term_summary = ""
+        
+        log_thinking(f"--- Started New Session: {session_id} ---")
+    
+    async def _summarize_and_save_session(self):
+        """
+        Creates a comprehensive summary of the current session and saves it to long-term memory.
+        """
+        if not self.current_session_history:
+            return
+        
+        # Create conversation text
+        conversation_text = ""
+        for msg in self.current_session_history:
+            conversation_text += f"{msg['role'].upper()}: {msg['content']}\n"
+        
+        # Generate comprehensive summary
+        summary_prompt = f"""
+        Create a comprehensive summary of this conversation session.
+        
+        Conversation:
+        {conversation_text}
+        
+        Working Memory Facts: {json.dumps(self.working_memory)}
+        
+        Create a detailed summary that includes:
+        1. WHO was involved (names, roles)
+        2. WHAT was discussed (main topics, questions asked)
+        3. KEY INFORMATION shared (facts, preferences, decisions)
+        4. OUTCOMES or conclusions reached
+        5. Any ACTION ITEMS or follow-ups mentioned
+        
+        Format this as a coherent narrative that preserves all important details.
+        """
+        
+        response = await self.llm.ainvoke([HumanMessage(content=summary_prompt)])
+        session_summary = response.content.strip()
+        
+        # Save to session summaries vector store
+        timestamp = asyncio.get_event_loop().time()
+        summary_with_metadata = f"Session {self.session_id} Summary:\n{session_summary}\nTimestamp: {timestamp}"
+        
+        memory.add_to_memory(
+            self.session_summaries,
+            summary_with_metadata,
+            str(config.VECTOR_STORES_DIR / "session_summaries.faiss")
+        )
+        
+        log_thinking(f"--- Session Summarized and Saved ---\n{session_summary}")
+
     async def aclose(self):
-        """Closes the database connection."""
+        """Closes the database connection and saves current session."""
+        # Summarize current session before closing
+        if self.current_session_history:
+            await self._summarize_and_save_session()
+            
         if self.conn:
             await self.conn.close()

@@ -47,9 +47,38 @@ def add_to_memory(vector_store: FAISS, text: str, path: str):
     vector_store.save_local(path)
 
 
-def query_memory(vector_store: FAISS, query: str) -> str:
+def query_memory(vector_store: FAISS, query: str, k: int = 40, threshold: float = None) -> str:
     """
     Queries the vector store for relevant information.
+    Returns all highly relevant memories as a formatted string.
+    
+    Args:
+        vector_store: The FAISS vector store to query
+        query: The query string
+        k: Maximum number of results to retrieve (default 40)
+        threshold: Optional similarity threshold (if provided, only returns results above this score)
     """
-    docs = vector_store.similarity_search(query, k=1)
-    return docs[0].page_content if docs else "No relevant information found."
+    # Try to get many relevant memories
+    try:
+        if threshold:
+            # Get results with scores
+            docs_and_scores = vector_store.similarity_search_with_score(query, k=k)
+            # Filter by threshold (lower scores are better in FAISS)
+            docs = [doc for doc, score in docs_and_scores if score <= threshold]
+        else:
+            docs = vector_store.similarity_search(query, k=k)
+    except:
+        # Fallback if the vector store is small
+        docs = vector_store.similarity_search(query, k=min(k, 5))
+    
+    if not docs:
+        return "No relevant information found."
+    
+    # Format multiple memories for better context
+    if len(docs) == 1:
+        return docs[0].page_content
+    else:
+        memories = []
+        for i, doc in enumerate(docs, 1):
+            memories.append(f"[Memory {i}]: {doc.page_content}")
+        return "\n".join(memories)

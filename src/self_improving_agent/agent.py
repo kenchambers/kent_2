@@ -4,8 +4,10 @@ self-improving agent.
 """
 import json
 import asyncio
+import aiosqlite
 from typing import TypedDict, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from . import config
@@ -22,7 +24,6 @@ class AgentState(TypedDict):
     short_term_summary: str  # A running summary of the recent conversation
     episodic_buffer: List[str]  # Context from the vector DB
     semantic_cache: Dict[str, Any]  # Caching factual lookups
-    long_term_memory: Optional[Any]  # The LTM vector store
     active_layer: Optional[str]
     layer_info: Dict[str, Any]
     new_layer_description: Optional[str]
@@ -48,7 +49,10 @@ class SelfImprovingAgent:
             model="gemini-1.5-pro-latest",
             google_api_key=config.load_api_key()
         )
-        self.graph = self._build_graph()
+        # AsyncSqliteSaver will be initialized in arun when we have async context
+        self.checkpointer = None
+        self.conn = None
+        self.graph = None  # Will be built when checkpointer is ready
         self.conversation_history: List[Dict[str, str]] = config.get_history()
         self.short_term_summary = ""
         self.experience_vector_store = memory.get_experience_vector_store()
@@ -266,7 +270,7 @@ class SelfImprovingAgent:
         workflow.add_edge("update_memory", "_update_short_term_summary")
         workflow.add_edge("_update_short_term_summary", END)
 
-        return workflow.compile()
+        return workflow.compile(checkpointer=self.checkpointer)
 
     async def _update_short_term_summary(self, state: AgentState) -> AgentState:
         """
@@ -558,7 +562,7 @@ class SelfImprovingAgent:
             f"User: {state['user_input']}\nAgent: {state['response']}"
         )
         memory.add_to_memory(
-            state["long_term_memory"],
+            self.long_term_memory,
             conversation_turn,
             str(
                 config.VECTOR_STORES_DIR /
@@ -571,17 +575,25 @@ class SelfImprovingAgent:
 
         return state
 
-    async def arun(self, user_input: str):
+    async def _ensure_initialized(self):
+        """Ensure the async components are initialized."""
+        if self.checkpointer is None:
+            self.conn = await aiosqlite.connect("langgraph_cache.db")
+            self.checkpointer = AsyncSqliteSaver(self.conn)
+            self.graph = self._build_graph()
+
+    async def arun(self, user_input: str, session_id: str = "default_session"):
         """
         Runs the agent.
         """
+        await self._ensure_initialized()
+        
         initial_state = {
             "user_input": user_input,
             "conversation_history": self.conversation_history,
             "short_term_summary": self.short_term_summary,
             "episodic_buffer": [],
             "semantic_cache": {},
-            "long_term_memory": self.long_term_memory,
             "layer_info": {},
             "active_layer": None,
             "new_layer_description": None,
@@ -593,7 +605,10 @@ class SelfImprovingAgent:
             "core_identity": self.core_identity,
             "emotional_context": None,
         }
-        final_state = await self.graph.ainvoke(initial_state)
+        final_state = await self.graph.ainvoke(
+            initial_state,
+            config={"configurable": {"thread_id": session_id}}
+        )
 
         # Update conversation history
         self.conversation_history.append(
@@ -609,3 +624,8 @@ class SelfImprovingAgent:
         self.core_identity = final_state["core_identity"]
 
         return final_state["response"]
+
+    async def aclose(self):
+        """Closes the database connection."""
+        if self.conn:
+            await self.conn.close()

@@ -110,6 +110,13 @@ async def startup_event():
     init_db()
     await get_agent()
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Close agent resources on shutdown."""
+    if agent:
+        await agent.aclose()
+        print("Agent connection closed.")
+
 # Mount static files for frontend (if available)
 frontend_static_path = os.path.join(os.path.dirname(__file__), "..", "frontend", ".next", "static")
 frontend_public_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "public")
@@ -529,7 +536,7 @@ async def chat_stream(message: ChatMessage):
             set_thinking_callback(thinking_callback)
             
             # Start agent processing in a separate task
-            agent_task = asyncio.create_task(agent_instance.arun(message.message))
+            agent_task = asyncio.create_task(agent_instance.arun(message.message, session_id=message.session_id))
             
             # Stream thinking messages as they come in
             response = None
@@ -592,7 +599,7 @@ async def chat(message: ChatMessage):
         agent_instance = await get_agent()
         
         # Get response from agent
-        response = await agent_instance.arun(message.message)
+        response = await agent_instance.arun(message.message, session_id=message.session_id)
         
         # Save conversation
         save_conversation(message.session_id, message.message, response)

@@ -4,23 +4,24 @@ from self_improving_agent.utils import log_response
 
 async def amain():
     """
-    Async main function to run the self-improving agent.
+    The main asynchronous function for the agent.
     """
     agent = SelfImprovingAgent()
     print("Welcome to the Self-Improving Agent!")
     print("Type 'exit' to quit.")
+    print()
 
-    while True:
-        try:
-            user_input = input("\nYou: ")
+    try:
+        while True:
+            user_input = input("You: ")
             if user_input.lower() == "exit":
                 break
-
             response = await agent.arun(user_input)
-            log_response(f"Agent: {response}")
-        except KeyboardInterrupt:
-            print("\nExiting...")
-            break
+            print(f"Agent: {response}")
+    finally:
+        await agent.aclose()
+        print("\nConnection closed. Goodbye!")
+
 
 def main():
     """

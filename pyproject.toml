@@ -11,17 +11,19 @@ license = {text = "MIT"}
 
 dependencies = [
     "langchain>=0.2.0",
-    "langgraph>=0.1.0",
+    "langgraph>=0.1.1",
+    "langgraph-checkpoint-sqlite>=0.1.0",
+    "aiosqlite>=0.20.0",
     "langchain-google-genai>=1.0.3",
     "google-generativeai>=0.5.4",
     "faiss-cpu>=1.8.0",
     "langchain-community>=0.2.0",
     "python-dotenv>=1.0.1",
     "tiktoken>=0.7.0",
-    "fastapi>=0.116.1",
-    "uvicorn>=0.35.0",
-    "pydantic>=2.11.7",
-    "python-multipart>=0.0.20",
+    "fastapi>=0.111.0",
+    "uvicorn>=0.29.0",
+    "pydantic>=2.7.1",
+    "python-multipart>=0.0.9",
 ]
 
 [project.scripts]

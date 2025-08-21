@@ -196,7 +196,7 @@ class SelfImprovingAgent:
         1. "emotional_context": A concise, one-sentence summary of the user's emotional and stylistic state (e.g., "The user seems curious and is communicating in a casual style.").
         2. "routing_decision": An object with your thought process for routing. It should contain:
            - "thought": Your reasoning process.
-           - "action": The name of the layer to use, or "new_layer".
+           - "action": Either a specific layer name from the available layers, "new_layer" to create a new layer, or "none"/"no_action_needed" for simple responses that don't require memory retrieval.
            - "confidence": A percentage of your confidence in this action.
            - "self_correction_plan": What to do if the action fails.
 
@@ -239,7 +239,7 @@ class SelfImprovingAgent:
 
             if action == "new_layer":
                 state["needs_new_layer"] = True
-            elif action == "none":
+            elif action in ["none", "no_action_needed"]:
                 state["needs_new_layer"] = False
                 state["active_layer"] = None
             else:

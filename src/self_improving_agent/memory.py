@@ -27,7 +27,7 @@ def get_vector_store(path: str, initial_documents: Optional[List[Document]] = No
 
     # If no initial documents are provided, use a default dummy document
     # to ensure the vector store is created correctly.
-    documents_to_add = initial_documents if initial_documents else [Document(page_content="initial document")]
+    documents_to_add = initial_documents if initial_documents else [Document(page_content="__EMPTY_STORE_PLACEHOLDER__")]
     vector_store = FAISS.from_documents(documents_to_add, embeddings)
     vector_store.save_local(path)
     return vector_store
@@ -75,4 +75,5 @@ def query_memory(vector_store: FAISS, query: str, k: int = 40, threshold: float 
         # Fallback if the vector store is small
         docs = vector_store.similarity_search(query, k=min(k, 5))
     
-    return docs
+    # Filter out the default "initial document"
+    return [doc for doc in docs if doc.page_content != "__EMPTY_STORE_PLACEHOLDER__"]

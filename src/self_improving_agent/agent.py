@@ -306,6 +306,7 @@ class SelfImprovingAgent:
         tasks = {
             "beliefs": self._get_core_beliefs(user_input),
             "sessions": self._get_session_summaries(user_input),
+            "dynamic": self._get_dynamic_memory(user_input),
         }
 
         if active_layer and not state["needs_new_layer"]:
@@ -998,8 +999,13 @@ class SelfImprovingAgent:
             str(config.VECTOR_STORES_DIR / "experience_layer.faiss")
         )
 
-        # Note: We no longer save individual turns to long-term memory
-        # Instead, sessions are summarized when they end
+        # Save the current turn to long-term memory
+        turn_text = f"User: {state['user_input']}\nAgent: {state['response']}"
+        memory.add_to_memory(
+            self.long_term_memory,
+            turn_text,
+            str(config.VECTOR_STORES_DIR / "long_term_conversation_memory.faiss")
+        )
 
         # Update semantic cache
         state["semantic_cache"][state["user_input"]] = state["response"]

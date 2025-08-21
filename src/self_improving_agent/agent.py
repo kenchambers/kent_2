@@ -140,6 +140,9 @@ class SelfImprovingAgent:
 
             if action == "new_layer":
                 state["needs_new_layer"] = True
+            elif action == "none":
+                state["needs_new_layer"] = False
+                state["active_layer"] = None
             else:
                 state["needs_new_layer"] = False
                 state["active_layer"] = action

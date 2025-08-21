@@ -5,6 +5,7 @@ from pathlib import Path
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.docstore.document import Document
+from typing import List, Dict, Any
 from . import config
 
 
@@ -39,18 +40,20 @@ def get_experience_vector_store() -> FAISS:
     )
 
 
-def add_to_memory(vector_store: FAISS, text: str, path: str):
+def add_to_memory(vector_store: FAISS, text: str, path: str, metadata: Dict[str, Any] = None):
     """
     Adds a new piece of text to the vector store and saves it.
     """
-    vector_store.add_texts([text])
+    # FAISS expects a list of documents and a corresponding list of metadatas
+    docs = [Document(page_content=text, metadata=metadata or {})]
+    vector_store.add_documents(docs)
     vector_store.save_local(path)
 
 
-def query_memory(vector_store: FAISS, query: str, k: int = 40, threshold: float = None) -> str:
+def query_memory(vector_store: FAISS, query: str, k: int = 40, threshold: float = None) -> List[Document]:
     """
     Queries the vector store for relevant information.
-    Returns all highly relevant memories as a formatted string.
+    Returns a list of Document objects, including their metadata.
     
     Args:
         vector_store: The FAISS vector store to query
@@ -71,14 +74,4 @@ def query_memory(vector_store: FAISS, query: str, k: int = 40, threshold: float 
         # Fallback if the vector store is small
         docs = vector_store.similarity_search(query, k=min(k, 5))
     
-    if not docs:
-        return "No relevant information found."
-    
-    # Format multiple memories for better context
-    if len(docs) == 1:
-        return docs[0].page_content
-    else:
-        memories = []
-        for i, doc in enumerate(docs, 1):
-            memories.append(f"[Memory {i}]: {doc.page_content}")
-        return "\n".join(memories)
+    return docs

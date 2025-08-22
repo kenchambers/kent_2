@@ -56,23 +56,29 @@ Here's how the self-improving agent's layers work together:
                                │          │
                                └──────┬───┘
                                       │
+                 ┌────────────────────▼────────────────────┐
+                 │      🔍 Layer Descriptions Cache
+                 │   (Semantic search on layer descriptions
+                 │    to find most relevant existing layers)
+                 └────────────────────┬────────────────────┘
+                                      │
               ┌───────────────────────▼───────────────────────┐
               │           🧠 PARALLEL MEMORY RETRIEVAL
               │            (asyncio.gather concurrent execution)
               │
               │ ┌─────────────┐  ┌──────────────┐  ┌───────────┐
-              │ │📚 Long-term ║  ║🎯 Topic      ║  ║🆔 Core     ║
+              │ │📚 Long-term ║  ║🎯 Topic          ║🆔 Core
               │ │Conversation ║  ║Specific      ║  ║Identity   ║
               │ │Memory       ║  ║Layers        ║  ║Beliefs    ║
               │ │(FAISS)      ║  ║(Dynamic)     ║  ║Layer      ║
               │ └─────────────┘  └──────────────┘  └───────────┘
               │         ║              ║              ║
               │         ▼              ▼              ▼
-              │ ┌─────────────┐  ┌──────────────┐  ┌───────────┐
-              │ │📊 Session   ║  ║📈 Experience ║  ║🔍 Layer    ║
-              │ │Summaries    ║  ║Vector Store  ║  ║Descriptions║
-              │ │(FAISS)      ║  ║(Past Actions)║  ║Cache      ║
-              │ └─────────────┘  └──────────────┘  └───────────┘
+              │ ┌─────────────┐  ┌──────────────┐     ║
+              │ │📊 Session   ║  ║📈 Experience        ║
+              │ │Summaries    ║  ║Vector Store  ║     ║
+              │ │(FAISS)      ║  ║(Past Actions)║     ║
+              │ └─────────────┘  └──────────────┘     ║
               │         ║              ║              ║
               │         └──────────────┼──────────────┘
               │                        ▼
@@ -108,7 +114,7 @@ Here's how the self-improving agent's layers work together:
 
 - **🎭 Emotional Intelligence**: Analyzes user sentiment and adapts communication style
 - **🧭 Dynamic Routing**: Decides whether to use existing knowledge or create new memory layers
-- **🧠 Parallel Memory Access**: Uses `asyncio.gather()` to query up to 6 specialized vector stores concurrently (beliefs, sessions, dynamic memory, topic layers, experience, and layer descriptions)
+- **🧠 Parallel Memory Access**: Uses `asyncio.gather()` to query up to 5 specialized vector stores concurrently (core beliefs, session summaries, long-term conversation, topic-specific layers, and experience)
 - **⚖️ Self-Correction**: Built-in quality control that revises responses before delivery
 - **📈 Continuous Learning**: Every interaction expands the agent's cognitive architecture
 

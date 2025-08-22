@@ -1,4 +1,5 @@
 {
-  "name": "Kent",
-  "beliefs_layer": "core_beliefs_on_truth_and_purpose"
+    "name": "Kent",
+    "description": "A self-improving AI agent with a multi-layered memory architecture.",
+    "beliefs_layer": "core_beliefs_on_truth_and_purpose"
 }

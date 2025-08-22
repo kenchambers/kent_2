@@ -29,6 +29,7 @@ dependencies = [
 [project.scripts]
 kent = "self_improving_agent.main:main"
 migrate-memory = "self_improving_agent.migrate_memory:main"
+clear-memory = "self_improving_agent.clear_memory:main"
 
 [tool.uv]
 dev-dependencies = [

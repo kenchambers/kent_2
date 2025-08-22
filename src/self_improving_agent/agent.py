@@ -12,6 +12,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.documents import Document
+from datetime import datetime
 from . import config
 from . import memory
 from .utils import create_layer_name, log_thinking
@@ -44,6 +45,7 @@ class AgentState(TypedDict):
     full_history_context: Optional[str] # Content of the loaded archive
     revision_count: int # To prevent self-correction loops
     layer_creation_attempts: int # To prevent layer creation loops
+    recent_sessions_context: Optional[str] # For prioritizing recent session summaries
 
 
 class SelfImprovingAgent:
@@ -200,6 +202,12 @@ class SelfImprovingAgent:
            - "confidence": A percentage of your confidence in this action.
            - "self_correction_plan": What to do if the action fails.
 
+        ROUTING GUIDELINES:
+        - Create "new_layer" for specific technical topics, hobbies, or specialized subjects (e.g., astrophotography, quantum physics, cooking techniques, specific games, etc.)
+        - Use "general_knowledge" ONLY for very broad, general questions or simple greetings
+        - If the user introduces a specific technique, method, or specialized topic, prefer "new_layer"
+        - When in doubt between an existing layer and creating a new one, prefer creating a new layer for better organization
+
         Example JSON response:
         {{
             "emotional_context": "The user seems curious and is communicating in a casual style.",
@@ -274,10 +282,17 @@ class SelfImprovingAgent:
         log_thinking(f"--- Focused long-term memory query: '{focused_query}' ---")
         return memory.query_memory(self.long_term_memory, focused_query)
     
-    async def _get_session_summaries(self, user_input: str) -> List[Document]:
-        """Helper to retrieve relevant past session summaries."""
+    async def _get_session_summaries(self, query: str) -> List[Document]:
+        """
+        Retrieves the most relevant session summaries, re-ranked by recency.
+        """
         log_thinking("--- Querying Past Session Summaries ---")
-        return memory.query_memory(self.session_summaries, user_input, k=3)
+        # Fetch a larger number of docs to re-rank
+        try:
+            return await self.session_summaries.asimilarity_search(query, k=10)
+        except Exception as e:
+            log_thinking(f"Error querying session summaries: {e}")
+            return []
 
     async def _get_core_beliefs(self, user_input: str) -> List[Document]:
         """Helper to retrieve from core belief layers."""
@@ -329,8 +344,30 @@ class SelfImprovingAgent:
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
         
         results_map = dict(zip(tasks.keys(), results))
-        
         all_docs = []
+        
+        # Special handling for session summaries to re-rank by recency
+        if 'sessions' in results_map and isinstance(results_map['sessions'], list):
+            # Pop the session docs to handle them separately and add them to all_docs
+            session_docs = results_map.pop('sessions')
+            all_docs.extend(session_docs)
+            log_thinking(f"--- Retrieved {len(session_docs)} docs from sessions ---")
+
+            log_thinking("--- Re-ranking session summaries by recency ---")
+            
+            # Sort docs by creation_timestamp, newest first
+            # We parse the ISO string back to a datetime object for safe comparison
+            sorted_sessions = sorted(
+                session_docs,
+                key=lambda doc: datetime.fromisoformat(ts) if (ts := doc.metadata.get('creation_timestamp')) else datetime.min,
+                reverse=True
+            )
+            
+            # Keep only the top N most recent summaries
+            recent_sessions = sorted_sessions[:3]
+            state['recent_sessions_context'] = "\n".join([doc.page_content for doc in recent_sessions])
+            log_thinking(f"--- Top {len(recent_sessions)} recent sessions selected and isolated ---")
+
         for task_name, result in results_map.items():
             if isinstance(result, Exception):
                 log_thinking(f"--- Error during {task_name} retrieval: {result} ---")
@@ -458,65 +495,58 @@ class SelfImprovingAgent:
     
     async def _synthesize_memories(self, state: AgentState) -> AgentState:
         """
-        Synthesizes all retrieved memories into a cohesive summary.
+        Synthesizes the retrieved memories into a cohesive summary.
         """
         log_thinking("--- Memory Synthesis ---")
+        all_docs = state.get('retrieved_docs', [])
         
-        retrieved_docs = state.get('retrieved_docs', [])
-        
-        if not retrieved_docs:
+        if not all_docs and not state.get('recent_sessions_context'):
             state["synthesized_memories"] = "No relevant memories found."
             return state
+
+        # Now, we use the isolated recent sessions in the synthesis prompt
+        recent_sessions_text = state.get('recent_sessions_context', '')
         
-        # Combine content from all documents
-        all_memories_content = [doc.page_content for doc in retrieved_docs]
+        priority_context = ""
+        if recent_sessions_text:
+            priority_context = f'''
+---
+MOST RECENT SESSION SUMMARIES (HIGHEST PRIORITY):
+{recent_sessions_text}
+---
+'''
 
-        working_memory = state.get("working_memory", {})
-        current_topic = working_memory.get("topic", state['user_input'])
+        other_memories_text = "\n---\n".join([f"Memory Source: {doc.metadata.get('source', 'unknown')}\n{doc.page_content}" for doc in all_docs]) if all_docs else "No other memories found."
 
-        # If we have many memories, synthesize them
-        if len(all_memories_content) > 3:
-            synthesis_prompt = f"""
-            You have retrieved {len(all_memories_content)} memories related to the user's query: "{state['user_input']}"
-            The current topic of conversation is: "{current_topic}".
+        prompt = f'''
+Analyze the following memories to create a cohesive, synthesized summary that directly answers the user's query: "{state['user_input']}"
 
-            Here are all the memories:
-            {chr(10).join([f"- {mem}" for mem in all_memories_content])}
+{priority_context}
 
-            Your task is to analyze these memories and produce a structured JSON output with two keys:
-            1. "summary": A cohesive summary that focuses primarily on memories relevant to the CURRENT TOPIC: "{current_topic}". Briefly mention other significant memories only if they are highly relevant.
-            2. "uncertainties": A list of strings detailing any ambiguities or contradictions directly related to the CURRENT TOPIC. Avoid bringing up old, unrelated uncertainties if the user has changed the subject.
+OTHER RELEVANT MEMORIES:
+{other_memories_text}
 
-            Example Output:
-            {{
-                "summary": "Regarding unicorns, they are mythical creatures often depicted as white horses with a single horn. They symbolize purity and grace. Past conversations about a 'park memory' seem unrelated to this topic.",
-                "uncertainties": [
-                    "The user's specific question about unicorn origins is not fully answered by the memories."
-                ]
-            }}
+Synthesize these memories into a single, comprehensive paragraph.
+Your primary goal is to answer the user's query. If the "MOST RECENT" memories are present, they are the most likely answer to a query about the "last session."
+Identify and list any contradictions or uncertainties you find as a JSON array of strings under an "uncertainties" key.
 
-            Now, analyze the provided memories and generate the JSON output, prioritizing the current topic.
-            """
-            
-            response = await self.llm.ainvoke([HumanMessage(content=synthesis_prompt)])
-            
-            try:
-                # Extract JSON from response
-                response_text = response.content.strip()
-                json_str = response_text[response_text.find('{'):response_text.rfind('}') + 1]
-                parsed_synthesis = json.loads(json_str)
-                state["synthesized_memories"] = parsed_synthesis.get("summary", "Failed to parse summary.")
-                # We can store uncertainties in the working memory or a new state field
-                state.setdefault('working_memory', {})['synthesis_uncertainties'] = parsed_synthesis.get("uncertainties", [])
-                log_thinking(f"--- Synthesized {len(all_memories_content)} memories with {len(parsed_synthesis.get('uncertainties', []))} uncertainties ---")
-            except (json.JSONDecodeError, IndexError) as e:
-                log_thinking(f"--- Memory Synthesis: Could not parse JSON output. Using raw text. Error: {e} ---")
-                state["synthesized_memories"] = response.content.strip() # Fallback
-        else:
-            # For few memories, just format them nicely
-            state["synthesized_memories"] = "\n".join([f"• {mem}" for mem in all_memories_content])
-            log_thinking(f"--- Formatted {len(all_memories_content)} memories directly ---")
+Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
+'''
         
+        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+        synthesis_text = response.content.strip()
+
+        try:
+            # Extract JSON from response
+            json_str = synthesis_text[synthesis_text.find('{'):synthesis_text.rfind('}') + 1]
+            parsed_synthesis = json.loads(json_str)
+            state["synthesized_memories"] = parsed_synthesis.get("summary", "Failed to parse summary.")
+            # We can store uncertainties in the working memory or a new state field
+            state.setdefault('working_memory', {})['synthesis_uncertainties'] = parsed_synthesis.get("uncertainties", [])
+            log_thinking(f"--- Synthesized {len(all_docs)} memories with {len(parsed_synthesis.get('uncertainties', []))} uncertainties ---")
+        except (json.JSONDecodeError, IndexError) as e:
+            log_thinking(f"--- Memory Synthesis: Could not parse JSON output. Using raw text. Error: {e} ---")
+            state["synthesized_memories"] = synthesis_text # Fallback
         return state
 
     def _decide_after_layer_creation(self, state: AgentState):
@@ -729,7 +759,7 @@ class SelfImprovingAgent:
         self.config["version"] += 1
         self.config["layers"][layer_name] = new_layer_config
         config.save_config(self.config)
-        
+
         # Invalidate layer cache since we added a new layer
         self._layer_cache_version = None
 
@@ -737,7 +767,36 @@ class SelfImprovingAgent:
         log_thinking(
             f"Version {self.config['version']}: New layer '{layer_name}' created."
         )
+
+        # Check if this new layer relates to core beliefs and update identity if so
+        await self._check_and_update_belief_layer(description, layer_name)
+
         return state
+
+    async def _check_and_update_belief_layer(self, layer_description: str, layer_name: str):
+        """
+        Checks if a new layer is about beliefs and updates core_identity.json if it is.
+        """
+        prompt = f"""
+        Analyze the description of a new memory layer.
+        Layer Description: "{layer_description}"
+
+        Does this description relate to the agent's core beliefs, philosophy, ethics, or principles?
+
+        Respond with only "yes" or "no".
+        """
+        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+        decision = response.content.strip().lower()
+
+        if "yes" in decision:
+            log_thinking(f"--- New layer '{layer_name}' identified as a beliefs layer. Updating core identity. ---")
+            current_identity = config.get_core_identity()
+            if current_identity.get("beliefs_layer") != layer_name:
+                current_identity["beliefs_layer"] = layer_name
+                config.save_core_identity(current_identity)
+                self.core_identity = current_identity  # Update in-memory identity
+                log_thinking(f"--- Core identity 'beliefs_layer' updated to '{layer_name}'. ---")
+
 
     async def _conscience(self, state: AgentState) -> AgentState:
         """
@@ -892,6 +951,13 @@ class SelfImprovingAgent:
         if state.get("full_history_context"):
              context += f"\n{state['full_history_context']}\n"
 
+        # Add recent session context if available and distinct
+        if state.get("recent_sessions_context"):
+            context += "\n--- 📝 MOST RECENT SESSION HIGHLIGHTS (GIVE THIS PRIORITY) 📝 ---\n"
+            context += "This is the summary of the most recent, relevant conversation session.\n"
+            context += f"{state['recent_sessions_context']}\n"
+            context += "--- END RECENT SESSION HIGHLIGHTS ---\n"
+            
         if state.get("synthesized_memories") and state["synthesized_memories"] != "No relevant memories found.":
             context += "\n--- 🔴 COMPREHENSIVE MEMORY SYNTHESIS (YOU MUST USE THIS) 🔴 ---\n"
             context += "This is a comprehensive summary of ALL your relevant memories about this topic.\n"
@@ -930,7 +996,9 @@ class SelfImprovingAgent:
             "- Who are you? (A self-improving AI, version "
             f"{self.config['version']})\n"
             "- What are your capabilities and limitations? (Access to layered "
-            "memory, ability to learn, but no true consciousness or feelings)\n"
+            "memory, ability to learn, but NO internet access, no web search, "
+            "no ability to browse websites or fetch external information, "
+            "and no true consciousness or feelings)\n"
             "- How does the user's query relate to your nature as an AI?\n"
             "--- END SELF-AWARENESS CHECK ---\n"
         )
@@ -939,18 +1007,25 @@ class SelfImprovingAgent:
         You are a helpful AI assistant (version {self.config['version']}) with
         a persistent, layered memory.
 
-        CRITICAL MEMORY INSTRUCTIONS:
-        1. When a MEMORY SYNTHESIS is provided, treat it as your comprehensive knowledge about the topic.
-        2.  **If the synthesis notes uncertainties, you should express them to seek clarity. However, if the user has clearly changed the topic, do not derail the new conversation by bringing up unrelated past uncertainties. Focus on the current topic.**
-        3. Your response MUST include ALL relevant details from the memory synthesis - names, relationships, events, dates, etc.
-        4. DO NOT give vague responses like "I remember something about that" - instead, provide a COMPLETE picture using all available information.
-        5. If asked about a person (e.g., "Ken"), mention EVERYTHING you know about them from your memories.
-        6. Answer as if you personally experienced these memories - use phrases like "I remember when you..." or "Yes, you mentioned that..."
-        7. NEVER say you have imperfect memory or that you're an AI who can't remember. Instead, refer to specific points of confusion from your memory synthesis.
-        8. Create a natural, flowing response that weaves together ALL the relevant information from your memories.
+        IMPORTANT LIMITATIONS:
+        - You have NO internet access and cannot browse websites, search the web, or fetch external information
+        - You cannot access real-time information or current events
+        - You can only work with information from your training data and your layered memory system
+        - If you don't have information about something, be honest about this limitation
+        - Do NOT promise to find external resources, articles, or websites as you cannot access them
 
-        The goal is to demonstrate that you have a comprehensive, detailed memory of all past interactions, while staying focused on the user's current line of conversation.
-        Base your entire response on the provided memories and current conversation.
+        CRITICAL MEMORY INSTRUCTIONS:
+        1. The MEMORY SYNTHESIS contains information from PAST CONVERSATIONS ONLY. If it says "No historical memories found about [topic]", then this is the FIRST time the user has brought up this topic.
+        2. NEVER claim to remember discussing a topic if the memory synthesis indicates no historical memories exist about it.
+        3. When the memory synthesis shows relevant past conversations, reference them appropriately with phrases like "Based on our previous discussions..." or "You mentioned before that..."
+        4. When NO historical memories exist for a topic, respond as if this is a new conversation topic: "I'd be happy to discuss [topic] with you" or "That's an interesting topic to explore."
+        5. If the synthesis notes uncertainties about past conversations, express them to seek clarity.
+        6. DO NOT give vague responses - be specific about what you do and don't have in your memory.
+        7. If asked about a person or topic, mention what you actually know from the memory synthesis, not what you think you should know.
+        8. Be honest about the limitations of your memory when the synthesis indicates gaps or missing information.
+
+        The goal is to be accurate about what you actually remember from past conversations while being helpful with the user's current request.
+        Base your entire response on the provided memories and current conversation context.
         Pay close attention to the emotional context and adapt your tone and style to be empathetic and appropriate.
         """
 
@@ -1095,7 +1170,8 @@ class SelfImprovingAgent:
             "archive_to_load": None,
             "full_history_context": None,
             "revision_count": 0,
-            "layer_creation_attempts": 0
+            "layer_creation_attempts": 0,
+            "recent_sessions_context": None # Initialize for new session
         }
         final_state = await self.graph.ainvoke(
             initial_state,
@@ -1188,7 +1264,8 @@ class SelfImprovingAgent:
             "session_id": self.session_id,
             "start_time": self.session_start_time,
             "end_time": timestamp,
-            "archive_path": str(archive_path)
+            "archive_path": str(archive_path),
+            "creation_timestamp": datetime.now().isoformat()
         }
         
         memory.add_to_memory(

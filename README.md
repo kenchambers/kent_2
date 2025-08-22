@@ -16,6 +16,7 @@ https://kent-ai-agent.fly.dev/
   - [🏗️ Layered Memory Architecture](#️-layered-memory-architecture)
   - [📚 Research-Backed Memory Architecture](#-research-backed-memory-architecture)
   - [🔀 Dynamic Graph Routing and Self-Improvement](#-dynamic-graph-routing-and-self-improvement)
+  - [⏱️ Time Complexity Analysis (Big O)](#️-time-complexity-analysis-big-o)
 - [✨ Recent Improvements](#-recent-improvements)
 - [🚀 Getting Started](#-getting-started)
 - [💻 Usage](#-usage)
@@ -86,6 +87,20 @@ Here's how the self-improving agent's layers work together:
               └───────────────────────┬───────────────────────┘
                                       │
                  ┌────────────────────▼────────────────────┐
+                 │         🔍 Drill Down Decision
+                 │   (Does user need verbatim details from
+                 │    full conversation transcripts?)
+                 └─────┬────────────────────────┬──────────┘
+                       │                        │
+                ┌──────▼─────┐            ┌─────▼──────┐
+                │ 📜 Load    │            │ ➡️ Continue │
+                │ Full       │            │ with       │
+                │ History    │            │ Summaries  │
+                └──────┬─────┘            └─────┬──────┘
+                       │                        │
+                       └────────┬───────────────┘
+                                │
+                 ┌──────────────▼──────────────────────────┐
                  │        💬 Response Generation
                  │    (Context-aware, Emotionally-tuned)
                  └────────────────────┬────────────────────┘
@@ -114,7 +129,9 @@ Here's how the self-improving agent's layers work together:
 
 - **🎭 Emotional Intelligence**: Analyzes user sentiment and adapts communication style
 - **🧭 Dynamic Routing**: Decides whether to use existing knowledge or create new memory layers
-- **🧠 Parallel Memory Access**: Uses `asyncio.gather()` to query up to 5 specialized vector stores concurrently (core beliefs, session summaries, long-term conversation, topic-specific layers, and experience)
+- **🔍 Layer Descriptions Cache**: Efficiently identifies relevant topic layers through semantic search
+- **🧠 Parallel Memory Access**: Uses `asyncio.gather()` to query up to 4 specialized vector stores concurrently (core beliefs, session summaries, long-term conversation, and optionally one topic-specific layer)
+- **📜 Drill Down Mechanism**: Intelligently loads full conversation transcripts when verbatim details are needed
 - **⚖️ Self-Correction**: Built-in quality control that revises responses before delivery
 - **📈 Continuous Learning**: Every interaction expands the agent's cognitive architecture
 
@@ -263,6 +280,52 @@ When the agent encounters a new domain (like "quantum physics" or "medieval hist
 
 The result is a system that literally grows more intelligent through use, developing new cognitive capacities that persist across all future interactions. The version number in `agent_config.json` serves as a record of this cognitive evolution, tracking each expansion of the agent's architectural sophistication. 📈
 
+### ⏱️ Time Complexity Analysis (Big O)
+
+Based on the architecture described in this document, here is the Big O notation complexity for the query layer and an explanation of how processing time is affected as new layers are added.
+
+The system is designed to be highly scalable. The key is a two-step process that prevents the agent from having to search through every piece of knowledge it has.
+
+#### The Query Process in a Nutshell
+
+1.  **Layer Selection**: First, the agent intelligently identifies the single most relevant "topic-specific layer" for your query. It does this by performing a semantic search over the _descriptions_ of all existing layers, not the full content of the layers themselves.
+2.  **Parallel Retrieval**: Once the best layer is identified, the agent queries it in parallel with a fixed set of other core memory types (like long-term conversation history, session summaries, etc.).
+
+---
+
+#### Time Complexity Analysis (Big O Notation)
+
+Let `L` be the total number of topic-specific memory layers.
+
+##### 1. Layer Selection Complexity: `O(log L)`
+
+This is the part of the process that depends on the total number of layers. To find the most relevant layer, the system must search through the `L` available layer descriptions.
+
+- The project uses FAISS, a library for efficient similarity search on vector databases.
+- A search in a FAISS index is not linear (`O(L)`). It's a highly optimized, sub-linear operation.
+- The time complexity is effectively logarithmic, or **`O(log L)`**.
+
+This means that even if you double the number of layers from 100 to 200, the time to find the correct one increases by a very small, constant amount, not twice as much.
+
+##### 2. Parallel Retrieval Complexity: `O(1)` with respect to `L`
+
+This is the crucial part for scalability. After the agent selects the most relevant layer, it runs a fixed number of queries in parallel. The system queries up to 4 sources concurrently (core beliefs, session summaries, long-term conversation, and optionally the **one** selected topic layer).
+
+- Because the queries run concurrently, the time taken is determined by the _slowest single query_, not the sum of them.
+- Adding new layers to the system increases the pool of choices for the "Layer Selection" step, but it **does not** add more queries to this parallel retrieval step. The number of concurrent queries remains constant.
+
+Therefore, this stage has a constant time complexity, **`O(1)`**, with respect to the number of layers `L`.
+
+---
+
+#### Conclusion: Overall Complexity is `O(log L)`
+
+Combining the two steps, the processing time of a query as you add more layers is dominated by the layer selection step.
+
+The overall query time complexity with respect to the number of layers is **`O(log L)`**.
+
+**In simple terms:** The agent's processing time increases only very slightly and efficiently as its knowledge base expands. This logarithmic scaling ensures that the agent can learn and manage thousands of distinct topics without becoming slow or inefficient. The architecture avoids a linear increase in search time, which would be a major bottleneck in less sophisticated systems.
+
 ## ✨ Recent Improvements
 
 **🔧 Enhanced Core Identity System**:
@@ -376,6 +439,7 @@ vector_stores/
   - Tracks the agent's current version number (increments with each architectural change)
   - Maintains a registry of all memory layers with their descriptions and file paths
   - Enables the agent to know what memory layers exist and how to access them
+  - Explicitly states that the `clear-memory` script resets `core_identity.json`
 
 - **Creation**: **👤 USER SETUP** - Copy from template during installation
 
@@ -413,6 +477,15 @@ vector_stores/
   - Can grow very large over time (hundreds of KB to MB)
 
 - **Why Ignored**: Contains personal conversation data that shouldn't be shared
+
+#### **`core_identity.json`**
+
+- **Purpose**:
+  - Stores the agent's foundational traits, such as its name and core beliefs.
+  - Unlike memory layers, this file defines the agent's fundamental "personality."
+- **Creation**: **📦 PROVIDED** - A default version is included in the repository.
+- **Evolution**: **🤖 AUTOMATIC** - The agent modifies this file directly when key identity traits change (e.g., when it is given a name).
+- **Why Ignored**: It is ignored by git to allow each user's agent to develop a unique identity without affecting the base template. It is reset to its template version when you run `uv run clear-memory`.
 
 ### 🔐 **Environment Variables (`.env`)**
 
@@ -455,6 +528,12 @@ These files ARE tracked and provide the starting structure for new installations
 - **Creation**: **📦 PROVIDED** - Included in the repository
 - **Usage**: Copied to `conversation_history.json` during setup
 
+#### **`core_identity.json.template`**
+
+- **Purpose**: Provides the initial, nameless identity for the agent.
+- **Creation**: **📦 PROVIDED** - Included in the repository.
+- **Usage**: Copied to `core_identity.json` by the `clear-memory` script to perform a full reset.
+
 ## 📋 Summary: What You Need to Create vs. What's Automatic
 
 ### 👤 **Manual Setup Required**:
@@ -482,36 +561,37 @@ To run the agent in CLI mode, execute the following command in your terminal:
 uv run kent
 ```
 
+### Clearing Agent Memory
+
+If you want to reset the agent to a completely clean slate (as if it were a fresh installation), you can run the memory clearing script. This is useful for starting new experiments or clearing out corrupted data.
+
+**⚠️ Warning**: This action is irreversible and will permanently delete all learned knowledge, conversation history, and memory layers.
+
+The script will:
+
+- Delete the entire `vector_stores/` directory.
+- Delete all `conversations.db` and `langgraph_cache.db` files for both the CLI and backend.
+- Reset `agent_config.json` and `conversation_history.json` from their templates.
+
+To run the script, execute the following command:
+
+```bash
+uv run clear-memory
+```
+
 ### Web Interface (Frontend + Backend)
 
-For the full web interface with streaming support, you need to run both the frontend and backend servers:
-
-#### Option 1: Using the Development Script (Recommended)
+To run the full web interface with streaming support, use the provided development script. This will start both the frontend and backend servers concurrently and display their logs in your terminal.
 
 ```bash
 ./dev.sh
 ```
 
-#### Option 2: Manual Setup
+This script handles dependency checks and ensures both servers are running correctly. Once started, you can access the application at:
 
-1. **Start the backend server:**
-
-   ```bash
-   cd backend
-   uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
-   ```
-
-2. **Start the frontend server (in a new terminal):**
-
-   ```bash
-   cd frontend
-   npm run dev
-   ```
-
-3. **Access the application:**
-   - **Frontend**: http://localhost:3000
-   - **Backend API**: http://localhost:8000
-   - **API Documentation**: http://localhost:8000/docs
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
 
 ## ⚙️ System Walkthrough
 
@@ -575,61 +655,63 @@ In essence, you are interacting with a stateful agent that doesn't just respond 
 
 The following research papers provide insights into advanced memory mechanisms and vector-based approaches pertinent to the methodologies employed in this repository:
 
-1. **Memory Layers at Scale**  
-   _Authors:_ Vincent-Pierre Berges, Barlas Oğuz, Daniel Haziza, Wen-tau Yih, Luke Zettlemoyer, Gargi Ghosh  
-   _Publication Date:_ December 12, 2024  
-   _Summary:_ This paper introduces memory layers that utilize a trainable key-value lookup mechanism, enabling models to incorporate additional parameters without increasing computational overhead. The study demonstrates that language models augmented with these memory layers outperform dense models with significantly higher computation budgets, especially in factual tasks.  
-   _Link:_ ([arxiv.org](https://arxiv.org/abs/2412.09764?utm_source=openai))
+1.  **Time-Aware Memory Retrieval**: The agent now timestamps every session summary. When retrieving memories, it uses a re-ranking algorithm that prioritizes the most recent sessions, preventing older, semantically heavy memories from overshadowing more recent, relevant conversations. This gives the agent a much stronger sense of conversational continuity.
 
-2. **Efficient Architecture for RISC-V Vector Memory Access**  
-   _Authors:_ Hongyi Guan, Yichuan Gao, Chenlu Miao, Haoyang Wu, Hang Zhu, Mingfeng Lin, Huayue Liang  
-   _Publication Date:_ April 11, 2025  
-   _Summary:_ This research presents EARTH, a novel vector memory access architecture designed to optimize strided and segment memory access patterns in vector processors. By integrating specialized shift networks, EARTH enhances performance for strided memory accesses, achieving significant speedups and reducing hardware area and power consumption.  
-   _Link:_ ([arxiv.org](https://arxiv.org/abs/2504.08334?utm_source=openai))
+1.  **Memory Layers at Scale**  
+    _Authors:_ Vincent-Pierre Berges, Barlas Oğuz, Daniel Haziza, Wen-tau Yih, Luke Zettlemoyer, Gargi Ghosh  
+    _Publication Date:_ December 12, 2024  
+    _Summary:_ This paper introduces memory layers that utilize a trainable key-value lookup mechanism, enabling models to incorporate additional parameters without increasing computational overhead. The study demonstrates that language models augmented with these memory layers outperform dense models with significantly higher computation budgets, especially in factual tasks.  
+    _Link:_ ([arxiv.org](https://arxiv.org/abs/2412.09764?utm_source=openai))
 
-3. **Enriching Word Vectors with Subword Information**  
-   _Authors:_ Piotr Bojanowski, Edouard Grave, Armand Joulin, Tomas Mikolov  
-   _Publication Date:_ July 15, 2016  
-   _Summary:_ This paper proposes a method where each word is represented as a bag of character n-grams, allowing models to capture subword information. This approach is particularly beneficial for languages with large vocabularies and many rare words, enabling the computation of word representations for words not present in the training data.  
-   _Link:_ ([arxiv.org](https://arxiv.org/abs/1607.04606?utm_source=openai))
+1.  **Efficient Architecture for RISC-V Vector Memory Access**  
+    _Authors:_ Hongyi Guan, Yichuan Gao, Chenlu Miao, Haoyang Wu, Hang Zhu, Mingfeng Lin, Huayue Liang  
+    _Publication Date:_ April 11, 2025  
+    _Summary:_ This research presents EARTH, a novel vector memory access architecture designed to optimize strided and segment memory access patterns in vector processors. By integrating specialized shift networks, EARTH enhances performance for strided memory accesses, achieving significant speedups and reducing hardware area and power consumption.  
+    _Link:_ ([arxiv.org](https://arxiv.org/abs/2504.08334?utm_source=openai))
 
-4. **Multilayer Networks for Text Analysis with Multiple Data Types**  
-   _Authors:_ Charles C. Hyland, Yuanming Tao, Lamiae Azizi, Martin Gerlach, Eduardo G. Altmann  
-   _Publication Date:_ June 28, 2021  
-   _Summary:_ This study introduces a framework based on multilayer networks and stochastic block models to cluster documents and extract topics from large text collections. By incorporating multiple data types, such as metadata and hyperlinks, the approach provides a nuanced view of document clusters and improves link prediction capabilities.  
-   _Link:_ ([epjdatascience.springeropen.com](https://epjdatascience.springeropen.com/articles/10.1140/epjds/s13688-021-00288-5?utm_source=openai))
+1.  **Enriching Word Vectors with Subword Information**  
+    _Authors:_ Piotr Bojanowski, Edouard Grave, Armand Joulin, Tomas Mikolov  
+    _Publication Date:_ July 15, 2016  
+    _Summary:_ This paper proposes a method where each word is represented as a bag of character n-grams, allowing models to capture subword information. This approach is particularly beneficial for languages with large vocabularies and many rare words, enabling the computation of word representations for words not present in the training data.  
+    _Link:_ ([arxiv.org](https://arxiv.org/abs/1607.04606?utm_source=openai))
 
-5. **Graph-based Topic Extraction from Vector Embeddings of Text Documents**  
-   _Authors:_ M. Tarik Altuncu, Sophia N. Yaliraki, Mauricio Barahona  
-   _Publication Date:_ October 28, 2020  
-   _Summary:_ This paper presents an unsupervised framework that combines vector embeddings from natural language processing with multiscale graph partitioning to extract topics from large text corpora. The method is demonstrated on a corpus of news articles, showcasing its effectiveness in revealing natural partitions without prior assumptions about the number of clusters.  
-   _Link:_ ([arxiv.org](https://arxiv.org/abs/2010.15067?utm_source=openai))
+1.  **Multilayer Networks for Text Analysis with Multiple Data Types**  
+    _Authors:_ Charles C. Hyland, Yuanming Tao, Lamiae Azizi, Martin Gerlach, Eduardo G. Altmann  
+    _Publication Date:_ June 28, 2021  
+    _Summary:_ This study introduces a framework based on multilayer networks and stochastic block models to cluster documents and extract topics from large text collections. By incorporating multiple data types, such as metadata and hyperlinks, the approach provides a nuanced view of document clusters and improves link prediction capabilities.  
+    _Link:_ ([epjdatascience.springeropen.com](https://epjdatascience.springeropen.com/articles/10.1140/epjds/s13688-021-00288-5?utm_source=openai))
 
-6. **The Influence of Feature Representation of Text on the Performance of Document Classification**  
-   _Authors:_ Miroslav Kubat, Stanislav Holub, Michal Krátký  
-   _Publication Date:_ February 2019  
-   _Summary:_ This study examines how different text representation methods, including continuous-space models like word2vec and doc2vec, impact the performance of document classification tasks. The findings highlight the advantages of these models in capturing syntactic and semantic regularities, leading to improved classification outcomes.  
-   _Link:_ ([mdpi.com](https://www.mdpi.com/2076-3417/9/4/743?utm_source=openai))
+1.  **Graph-based Topic Extraction from Vector Embeddings of Text Documents**  
+    _Authors:_ M. Tarik Altuncu, Sophia N. Yaliraki, Mauricio Barahona  
+    _Publication Date:_ October 28, 2020  
+    _Summary:_ This paper presents an unsupervised framework that combines vector embeddings from natural language processing with multiscale graph partitioning to extract topics from large text corpora. The method is demonstrated on a corpus of news articles, showcasing its effectiveness in revealing natural partitions without prior assumptions about the number of clusters.  
+    _Link:_ ([arxiv.org](https://arxiv.org/abs/2010.15067?utm_source=openai))
 
-7. **A Vector Space Approach for Measuring Relationality and Multidimensionality of Meaning in Large Text Collections**  
-   _Authors:_ Philipp Poschmann, Jan Goldenstein, Sven Büchel, Udo Hahn  
-   _Publication Date:_ 2024  
-   _Summary:_ This paper introduces a vector space model to analyze large text collections, focusing on measuring relationality and multidimensionality of meaning. The approach facilitates the exploration of complex semantic relationships within texts, providing a structured method for text analysis.  
-   _Link:_ ([journals.sagepub.com](https://journals.sagepub.com/doi/full/10.1177/10944281231213068?utm_source=openai))
+1.  **The Influence of Feature Representation of Text on the Performance of Document Classification**  
+    _Authors:_ Miroslav Kubat, Stanislav Holub, Michal Krátký  
+    _Publication Date:_ February 2019  
+    _Summary:_ This study examines how different text representation methods, including continuous-space models like word2vec and doc2vec, impact the performance of document classification tasks. The findings highlight the advantages of these models in capturing syntactic and semantic regularities, leading to improved classification outcomes.  
+    _Link:_ ([mdpi.com](https://www.mdpi.com/2076-3417/9/4/743?utm_source=openai))
 
-8. **Improving Deep Neural Network Design with New Text Data Representations**  
-   _Authors:_ John Doe, Jane Smith  
-   _Publication Date:_ 2017  
-   _Summary:_ This research explores innovative text data representations to enhance deep neural network designs. By introducing new embedding techniques, the study demonstrates improvements in classification accuracy and training efficiency, particularly in the context of text data.  
-   _Link:_ ([link.springer.com](https://link.springer.com/article/10.1186/s40537-017-0065-8?utm_source=openai))
+1.  **A Vector Space Approach for Measuring Relationality and Multidimensionality of Meaning in Large Text Collections**  
+    _Authors:_ Philipp Poschmann, Jan Goldenstein, Sven Büchel, Udo Hahn  
+    _Publication Date:_ 2024  
+    _Summary:_ This paper introduces a vector space model to analyze large text collections, focusing on measuring relationality and multidimensionality of meaning. The approach facilitates the exploration of complex semantic relationships within texts, providing a structured method for text analysis.  
+    _Link:_ ([journals.sagepub.com](https://journals.sagepub.com/doi/full/10.1177/10944281231213068?utm_source=openai))
 
-9. **Document Vectorization Method Using Network Information of Words**  
-   _Authors:_ Yuki Matsuda, Hiroshi Sawada  
-   _Publication Date:_ 2019  
-   _Summary:_ This paper proposes a novel method for document vectorization that leverages the relational characteristics of words within a document. By utilizing centrality measures and tie weights between words, the approach aims to capture the unique characteristics of documents more effectively than traditional frequency-based methods.  
-   _Link:_ ([pmc.ncbi.nlm.nih.gov](https://pmc.ncbi.nlm.nih.gov/articles/PMC6638850/?utm_source=openai))
+1.  **Improving Deep Neural Network Design with New Text Data Representations**  
+    _Authors:_ John Doe, Jane Smith  
+    _Publication Date:_ 2017  
+    _Summary:_ This research explores innovative text data representations to enhance deep neural network designs. By introducing new embedding techniques, the study demonstrates improvements in classification accuracy and training efficiency, particularly in the context of text data.  
+    _Link:_ ([link.springer.com](https://link.springer.com/article/10.1186/s40537-017-0065-8?utm_source=openai))
 
-10. **Navigating the Multimodal Landscape: A Review on Integration of Text and Image Data in Machine Learning Architectures**  
+1.  **Document Vectorization Method Using Network Information of Words**  
+    _Authors:_ Yuki Matsuda, Hiroshi Sawada  
+    _Publication Date:_ 2019  
+    _Summary:_ This paper proposes a novel method for document vectorization that leverages the relational characteristics of words within a document. By utilizing centrality measures and tie weights between words, the approach aims to capture the unique characteristics of documents more effectively than traditional frequency-based methods.  
+    _Link:_ ([pmc.ncbi.nlm.nih.gov](https://pmc.ncbi.nlm.nih.gov/articles/PMC6638850/?utm_source=openai))
+
+1.  **Navigating the Multimodal Landscape: A Review on Integration of Text and Image Data in Machine Learning Architectures**  
     _Authors:_ John Doe, Jane Smith  
     _Publication Date:_ 2024  
     _Summary:_ This review explores the integration of text and image data in machine learning architectures, highlighting the challenges and advancements in multimodal data processing. The paper discusses various approaches to effectively combine different data modalities for improved model performance.  

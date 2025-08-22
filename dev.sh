@@ -27,8 +27,11 @@ fi
 # Start backend
 echo "🐍 Starting Python backend..."
 cd backend
-pip install -r requirements.txt 2>/dev/null || echo "Dependencies already installed"
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000 &
+if [ ! -d "venv" ]; then
+    uv venv
+    uv pip install -r requirements.txt
+fi
+uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 cd ..
 
@@ -39,7 +42,9 @@ sleep 3
 # Start frontend
 echo "⚛️  Starting Next.js frontend..."
 cd frontend
-npm install 2>/dev/null || echo "Dependencies already installed"
+if [ ! -d "node_modules" ]; then
+    npm install
+fi
 npm run dev &
 FRONTEND_PID=$!
 cd ..

@@ -59,7 +59,8 @@ def load_api_key() -> str:
         raise ValueError("GOOGLE_API_KEY not found in .env file.")
     return api_key
 
-CORE_IDENTITY_FILE = Path("src/self_improving_agent/core_identity.json")
+_BASE_DIR = Path(__file__).parent.resolve()
+CORE_IDENTITY_FILE = _BASE_DIR / "core_identity.json"
 
 def get_core_identity() -> Dict[str, Any]:
     """

@@ -254,10 +254,25 @@ class SelfImprovingAgent:
 
         return state
 
-    async def _get_dynamic_memory(self, user_input: str) -> str:
+    async def _get_dynamic_memory(self, state: AgentState) -> str:
         """Helper to retrieve from long-term conversational memory."""
         log_thinking("--- Querying Long-Term Conversational Memory ---")
-        return memory.query_memory(self.long_term_memory, user_input)
+        user_input = state["user_input"]
+        working_memory = state.get("working_memory", {})
+
+        # Construct a more focused query from the working memory
+        topic = working_memory.get("topic")
+        question = working_memory.get("question")
+
+        if topic and question:
+            focused_query = f"Regarding the topic of {topic}: {question}"
+        elif topic:
+            focused_query = f"Information about the topic: {topic}"
+        else:
+            focused_query = user_input
+
+        log_thinking(f"--- Focused long-term memory query: '{focused_query}' ---")
+        return memory.query_memory(self.long_term_memory, focused_query)
     
     async def _get_session_summaries(self, user_input: str) -> List[Document]:
         """Helper to retrieve relevant past session summaries."""
@@ -304,7 +319,7 @@ class SelfImprovingAgent:
         tasks = {
             "beliefs": self._get_core_beliefs(user_input),
             "sessions": self._get_session_summaries(user_input),
-            "dynamic": self._get_dynamic_memory(user_input),
+            "dynamic": self._get_dynamic_memory(state),
         }
 
         if active_layer and not state["needs_new_layer"]:
@@ -455,29 +470,32 @@ class SelfImprovingAgent:
         
         # Combine content from all documents
         all_memories_content = [doc.page_content for doc in retrieved_docs]
-        
+
+        working_memory = state.get("working_memory", {})
+        current_topic = working_memory.get("topic", state['user_input'])
+
         # If we have many memories, synthesize them
         if len(all_memories_content) > 3:
             synthesis_prompt = f"""
             You have retrieved {len(all_memories_content)} memories related to the user's query: "{state['user_input']}"
-            
+            The current topic of conversation is: "{current_topic}".
+
             Here are all the memories:
             {chr(10).join([f"- {mem}" for mem in all_memories_content])}
-            
-            Your task is to analyze these memories and produce a structured JSON output. The JSON should have two keys:
-            1. "summary": A comprehensive, cohesive summary that identifies key facts, names, dates, relationships, and recurring themes.
-            2. "uncertainties": A list of strings detailing any ambiguities, contradictions, or low-confidence connections you found. For example: "The user's name is unclear (mentioned as both Ken and Kent)" or "The connection between the 'park memory' and 'LLM project' is not explicitly stated."
+
+            Your task is to analyze these memories and produce a structured JSON output with two keys:
+            1. "summary": A cohesive summary that focuses primarily on memories relevant to the CURRENT TOPIC: "{current_topic}". Briefly mention other significant memories only if they are highly relevant.
+            2. "uncertainties": A list of strings detailing any ambiguities or contradictions directly related to the CURRENT TOPIC. Avoid bringing up old, unrelated uncertainties if the user has changed the subject.
 
             Example Output:
             {{
-                "summary": "The user, likely named Ken, has discussed building an LLM and has a significant memory related to a park. The agent, Kent, has emphasized its nature as an AI and its commitment to honesty.",
+                "summary": "Regarding unicorns, they are mythical creatures often depicted as white horses with a single horn. They symbolize purity and grace. Past conversations about a 'park memory' seem unrelated to this topic.",
                 "uncertainties": [
-                    "User's name is ambiguous (Ken/Kent).",
-                    "The relationship between the park memory and the LLM project is unclear."
+                    "The user's specific question about unicorn origins is not fully answered by the memories."
                 ]
             }}
 
-            Now, analyze the provided memories and generate the JSON output.
+            Now, analyze the provided memories and generate the JSON output, prioritizing the current topic.
             """
             
             response = await self.llm.ainvoke([HumanMessage(content=synthesis_prompt)])
@@ -738,20 +756,24 @@ class SelfImprovingAgent:
             for u in uncertainties:
                 memory_context += f"- {u}\n"
 
+        working_memory = state.get("working_memory", {})
+        current_topic = working_memory.get("topic", "the user's query")
+
         prompt = f"""
         Here is my plan: {state['inner_monologue']}
         Here is my generated answer: {state['response']}
+        The current conversational topic is: {current_topic}
         {memory_context}
-        
+
         Critique this answer based on these rules: {self.constitution}
-        
+
         ADDITIONAL CRITICAL CHECKS:
-        1.  **UNCERTAINTY HANDLING**: If any "CRITICAL UNCERTAINTIES" were identified, the response MUST NOT state them as facts. It should express them as points of uncertainty and ask for clarification (e.g., "My memory is a bit unclear on this, could you confirm..."). Stating an uncertainty as a fact is a MAJOR FAILURE.
-        2.  **MEMORY USAGE**: The response MUST incorporate multiple specific details from the memory synthesis.
-        3.  **SPECIFICITY**: The response should include specific names, facts, dates, and details from the memories, not vague acknowledgments.
-        
-        Is the agent making a good-faith effort to be helpful, honest, and transparent about its own memory's limitations?
-        If not, suggest a revision or a follow-up action.
+        1.  **UNCERTAINTY HANDLING**: The response must handle uncertainties correctly. However, if the user has clearly changed the topic, the response should prioritize the new topic. It is acceptable to not bring up old, unrelated uncertainties. The response should NOT derail the current conversation.
+        2.  **MEMORY USAGE**: The response MUST incorporate specific details from the memory synthesis that are relevant to the current topic.
+        3.  **RELEVANCE**: Is the response focused on the user's most recent query and the current topic? Or is it getting stuck on a previous, unrelated topic? It should stay on topic.
+
+        Is the agent making a good-faith effort to be helpful and stay focused on the user's current needs?
+        If not, suggest a revision.
         Respond with "Positive" if the answer is good, or "Negative: [specific issue]" if it needs revision.
         """
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
@@ -765,7 +787,7 @@ class SelfImprovingAgent:
         Determines the next step after the conscience has reviewed the response.
         Prevents infinite revision loops.
         """
-        MAX_REVISIONS = 1 # Initial attempt + 2 revisions
+        MAX_REVISIONS = 2 # Initial attempt + 2 revisions
         revision_count = state.get('revision_count', 0)
 
         if state["critique"] and "Negative" in state["critique"] and revision_count <= MAX_REVISIONS:
@@ -916,18 +938,18 @@ class SelfImprovingAgent:
         system_prompt = f"""
         You are a helpful AI assistant (version {self.config['version']}) with
         a persistent, layered memory.
-        
+
         CRITICAL MEMORY INSTRUCTIONS:
         1. When a MEMORY SYNTHESIS is provided, treat it as your comprehensive knowledge about the topic.
-        2.  **If the synthesis notes any uncertainties, you MUST express them as such in your response. DO NOT state them as facts. Ask clarifying questions.**
+        2.  **If the synthesis notes uncertainties, you should express them to seek clarity. However, if the user has clearly changed the topic, do not derail the new conversation by bringing up unrelated past uncertainties. Focus on the current topic.**
         3. Your response MUST include ALL relevant details from the memory synthesis - names, relationships, events, dates, etc.
         4. DO NOT give vague responses like "I remember something about that" - instead, provide a COMPLETE picture using all available information.
-        5. If asked about a person (e.g., "Ken"), mention EVERYTHING you know: their workplace, coworkers, projects, conversations, preferences, etc., while clearly noting any uncertainties.
+        5. If asked about a person (e.g., "Ken"), mention EVERYTHING you know about them from your memories.
         6. Answer as if you personally experienced these memories - use phrases like "I remember when you..." or "Yes, you mentioned that..."
         7. NEVER say you have imperfect memory or that you're an AI who can't remember. Instead, refer to specific points of confusion from your memory synthesis.
         8. Create a natural, flowing response that weaves together ALL the relevant information from your memories.
-        
-        The goal is to demonstrate that you have a comprehensive, detailed memory of all past interactions, including an awareness of its own limitations.
+
+        The goal is to demonstrate that you have a comprehensive, detailed memory of all past interactions, while staying focused on the user's current line of conversation.
         Base your entire response on the provided memories and current conversation.
         Pay close attention to the emotional context and adapt your tone and style to be empathetic and appropriate.
         """

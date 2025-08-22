@@ -638,7 +638,17 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
         decision_text = response.content.strip()
 
         try:
-            decision = json.loads(decision_text)
+            # Extract JSON from the response, assuming it might be wrapped in markdown
+            if "```json" in decision_text:
+                json_str = decision_text.split("```json")[1].split("```")[0].strip()
+            else:
+                # Fallback for raw JSON
+                json_str = decision_text[decision_text.find('{'):decision_text.rfind('}') + 1]
+
+            if not json_str:
+                 raise json.JSONDecodeError("No JSON object found in response", decision_text, 0)
+                 
+            decision = json.loads(json_str)
             if decision.get("drill_down"):
                 state['drill_down_needed'] = True
                 state['archive_to_load'] = most_relevant_session.metadata['archive_path']

@@ -76,4 +76,4 @@ def query_memory(vector_store: FAISS, query: str, k: int = 40, threshold: float 
         docs = vector_store.similarity_search(query, k=min(k, 5))
     
     # Filter out the default "initial document"
-    return [doc for doc in docs if doc.page_content != "__EMPTY_STORE_PLACEHOLDER__"]
+    return [doc for doc in docs if doc.page_content not in ("__EMPTY_STORE_PLACEHOLDER__", "initial document")]

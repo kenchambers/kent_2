@@ -97,7 +97,7 @@ class SelfImprovingAgent:
             "Admit when you don't know something.",
         ]
         self.simple_greetings = re.compile(
-            r"^\s*(hi|hello|hey|yo|heya|howdy|sup|what's up|greetings)\s*$",
+            r"^\s*(hi|hello|hey|yo|heya|howdy|sup|what's up|greetings)(\s+\w+)?\s*$",
             re.IGNORECASE
         )
 
@@ -266,7 +266,7 @@ class SelfImprovingAgent:
 
     async def _get_core_beliefs(self, user_input: str) -> List[Document]:
         """Helper to retrieve from core belief layers."""
-        retrieved_beliefs = []
+        retrieved_beliefs: List[Document] = []
         for key, value in self.core_identity.items():
             if key.endswith("_layer"):
                 layer_name = value
@@ -276,12 +276,10 @@ class SelfImprovingAgent:
                     vector_store = memory.get_vector_store(
                         layer_config["vector_store_path"]
                     )
-                    # Core beliefs can return simple strings for now
                     retrieved_info = memory.query_memory(vector_store, user_input)
-                    # Convert to Document objects for consistency if needed, but for now we'll handle strings
-                    docs_as_string = "\n".join([d.page_content for d in retrieved_info])
-                    log_thinking(f"--- Retrieved Belief: {docs_as_string} ---")
-                    retrieved_beliefs.append(docs_as_string)
+                    if retrieved_info:
+                        log_thinking(f"--- Retrieved {len(retrieved_info)} beliefs from {layer_name} ---")
+                        retrieved_beliefs.extend(retrieved_info)
         return retrieved_beliefs
 
     async def _get_existing_layer_info(self, layer_name: str, user_input: str) -> Optional[List[Document]]:
@@ -323,13 +321,10 @@ class SelfImprovingAgent:
                 log_thinking(f"--- Error during {task_name} retrieval: {result} ---")
                 continue
 
-            if result:
-                if isinstance(result, list) and all(isinstance(i, Document) for i in result):
-                    all_docs.extend(result)
-                    log_thinking(f"--- Retrieved {len(result)} docs from {task_name} ---")
-                elif isinstance(result, list): # For core beliefs returning strings
-                     all_docs.extend([Document(page_content=item) for item in result])
-                     log_thinking(f"--- Retrieved {len(result)} items from {task_name} ---")
+            if result and isinstance(result, list):
+                # Now all results are expected to be List[Document]
+                all_docs.extend(result)
+                log_thinking(f"--- Retrieved {len(result)} docs from {task_name} ---")
 
         state['retrieved_docs'] = all_docs
         return state
@@ -770,7 +765,7 @@ class SelfImprovingAgent:
         Determines the next step after the conscience has reviewed the response.
         Prevents infinite revision loops.
         """
-        MAX_REVISIONS = 2 # Initial attempt + 2 revisions
+        MAX_REVISIONS = 1 # Initial attempt + 2 revisions
         revision_count = state.get('revision_count', 0)
 
         if state["critique"] and "Negative" in state["critique"] and revision_count <= MAX_REVISIONS:
@@ -788,17 +783,26 @@ class SelfImprovingAgent:
         Checks if a core identity trait has been updated and saves it.
         """
         prompt = f"""
-        Analyze the following interaction and determine if a core identity trait
-        of the agent has been established or changed.
-        The current identity is: {state['core_identity']}
+        Analyze the following interaction and determine if the AGENT's core identity trait
+        has been established or changed.
+        
+        CRITICAL: Only update the agent's identity if the user is explicitly:
+        1. Giving the AGENT a name (e.g., "I'll call you Kent" or "Your name is Kent")
+        2. Establishing beliefs FOR THE AGENT (not the user's own beliefs)
+        
+        Do NOT update the agent's identity if:
+        - The user is introducing themselves (e.g., "I'm Ken" or "My name is Ken")
+        - The user is talking about their own beliefs or characteristics
+        
+        The current AGENT identity is: {state['core_identity']}
         The interaction was:
         User: "{state['user_input']}"
         Agent: "{state['response']}"
 
         We are tracking "name" and "beliefs_layer" (for referencing belief memory layers).
-        If the user gave the agent a name or wants to establish beliefs, respond with ONLY a JSON object with the updated
+        If the user gave the AGENT a new name or established the AGENT's beliefs, respond with ONLY a JSON object with the updated
         identity. For example: {{"name": "Kent"}} or {{"beliefs_layer": "core_beliefs_on_truth_and_purpose"}}
-        If no identity trait was changed, respond with the exact text "No change.".
+        If no AGENT identity trait was changed, respond with the exact text "No change.".
         Do not include any other text or formatting.
         """
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
@@ -899,7 +903,7 @@ class SelfImprovingAgent:
         context += (
             "\n--- SELF-AWARENESS CHECK ---\n"
             "Before you answer, take a moment to consider:\n"
-            f"- Your name is {state['core_identity'].get('name', 'not set')}.\n"
+            f"- Your name is {self.core_identity.get('name', 'not set')}.\n"
             f"- Your beliefs are retrieved from your beliefs layer when relevant.\n"
             "- Who are you? (A self-improving AI, version "
             f"{self.config['version']})\n"
@@ -1029,9 +1033,19 @@ class SelfImprovingAgent:
         if self.session_id != session_id:
             await self._start_new_session(session_id)
         
-        # Triage for simple greetings to provide a quick response at the start of a session
-        if self.simple_greetings.match(user_input) and not self.current_session_history:
-            response = "Hey there! How can I help you today?"
+        # Triage for simple greetings to provide a quick response
+        greeting_match = self.simple_greetings.match(user_input)
+        if greeting_match and len(self.current_session_history) < 4:  # Allow greetings in early conversation
+            # Check if the greeting includes the agent's name
+            if greeting_match.group(2) and self.core_identity.get('name'):
+                agent_name = self.core_identity.get('name', 'there')
+                if greeting_match.group(2).strip().lower() == agent_name.lower():
+                    response = f"Hey there! Yes, I'm {agent_name}. How can I help you today?"
+                else:
+                    response = "Hey there! How can I help you today?"
+            else:
+                response = "Hey there! How can I help you today?"
+            
             self.current_session_history.append({"role": "user", "content": user_input})
             self.current_session_history.append({"role": "agent", "content": response})
             return response

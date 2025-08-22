@@ -9,7 +9,8 @@ export function Terminal() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
-  const [currentThinking, setCurrentThinking] = useState('')
+  const [thinkingSteps, setThinkingSteps] = useState([])
+  const [showThinking, setShowThinking] = useState(false)
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -20,7 +21,7 @@ export function Terminal() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, thinkingSteps])
 
   useEffect(() => {
     // Focus input on mount
@@ -35,7 +36,8 @@ export function Terminal() {
     setInput('')
     setIsLoading(true)
     setIsStreaming(true)
-    setCurrentThinking('')
+    setThinkingSteps([])
+    setShowThinking(false)
 
     // Add user message
     setMessages(prev => [...prev, { type: 'user', content: userMessage }])
@@ -82,21 +84,34 @@ export function Terminal() {
               const data = JSON.parse(line.slice(6))
               
               if (data.type === 'thinking') {
-                setCurrentThinking(data.content)
-              } else if (data.type === 'response') {
-                // Clear thinking and add final response
-                setCurrentThinking('')
-                setMessages(prev => [...prev, { 
-                  type: 'agent', 
+                setThinkingSteps(prev => [...prev, {
+                  id: Date.now() + Math.random(),
                   content: data.content,
-                  timestamp: data.timestamp 
+                  timestamp: data.timestamp || new Date().toISOString(),
+                  isNew: true
                 }])
+                setShowThinking(true)
+              } else if (data.type === 'response') {
+                // Start fade out animation for thinking steps first
+                setThinkingSteps(prev => prev.map(step => ({...step, isNew: false, fading: true})))
+                // Clear thinking steps after fade animation
+                setTimeout(() => {
+                  setThinkingSteps([])
+                  setShowThinking(false)
+                  // Add response after thinking is cleared
+                  setMessages(prev => [...prev, { 
+                    type: 'agent', 
+                    content: data.content,
+                    timestamp: data.timestamp 
+                  }])
+                }, 1500)
               } else if (data.type === 'complete') {
                 // Stream completed
                 setIsStreaming(false)
                 setIsLoading(false)
               } else if (data.type === 'error') {
-                setCurrentThinking('')
+                setThinkingSteps([])
+                setShowThinking(false)
                 setMessages(prev => [...prev, { 
                   type: 'error', 
                   content: data.content
@@ -113,7 +128,8 @@ export function Terminal() {
       
     } catch (error) {
       console.error('Error sending message:', error)
-      setCurrentThinking('')
+      setThinkingSteps([])
+      setShowThinking(false)
       setMessages(prev => [...prev, { 
         type: 'error', 
         content: `Error: ${error.message}. Make sure the backend server is running.`
@@ -121,7 +137,8 @@ export function Terminal() {
     } finally {
       setIsLoading(false)
       setIsStreaming(false)
-      setCurrentThinking('')
+      setThinkingSteps([])
+      setShowThinking(false)
     }
   }
 
@@ -154,7 +171,7 @@ export function Terminal() {
   }
 
   return (
-    <div className="h-[600px] flex flex-col">
+    <div className="h-[calc(100vh-4rem)] max-h-[800px] flex flex-col">
       {/* Terminal Header */}
       <div className="bg-gray-800/50 border-b border-white/10 p-4 flex items-center space-x-2">
         <div className="flex space-x-2">
@@ -201,16 +218,43 @@ export function Terminal() {
           </div>
         ))}
 
-        {isStreaming && currentThinking && (
-          <div className="text-gray-400 pl-4 border-l-2 border-purple-500/30">
-            <div className="flex items-center space-x-2">
-              <div className="animate-spin w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full"></div>
-              <span className="font-mono text-xs">{currentThinking}</span>
+        {(isStreaming || showThinking) && thinkingSteps.length > 0 && (
+          <div className="space-y-2 mb-4">
+            <div className="text-xs text-gray-500 font-semibold uppercase tracking-wider flex items-center space-x-2">
+              <div className="animate-spin w-3 h-3 border border-purple-500 border-t-transparent rounded-full"></div>
+              <span>Thinking Process</span>
             </div>
+            {thinkingSteps.map((step, index) => (
+              <div 
+                key={step.id} 
+                className={`
+                  text-gray-400 pl-4 border-l-2 border-purple-500/30 bg-purple-500/5 rounded-r-lg p-2
+                  transition-all duration-1000 ease-out
+                  ${step.fading ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}
+                  ${step.isNew ? 'animate-pulse' : ''}
+                `}
+                style={{
+                  animationDelay: `${index * 0.1}s`,
+                  transform: step.fading ? 'translateX(-10px)' : 'translateX(0)'
+                }}
+              >
+                <div className="flex items-start space-x-2">
+                  <div className="animate-spin w-3 h-3 border border-purple-500 border-t-transparent rounded-full flex-shrink-0 mt-0.5"></div>
+                  <div className="font-mono text-xs leading-relaxed break-words flex-1">
+                    {step.content}
+                  </div>
+                </div>
+                {step.timestamp && (
+                  <div className="text-xs opacity-50 mt-1 ml-5">
+                    {new Date(step.timestamp).toLocaleTimeString()}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
 
-        {isLoading && !currentThinking && (
+        {isLoading && thinkingSteps.length === 0 && (
           <div className="text-gray-400 pl-4 border-l-2 border-purple-500/30">
             <div className="flex items-center space-x-2">
               <div className="animate-spin w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full"></div>

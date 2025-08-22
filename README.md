@@ -1,6 +1,7 @@
 # 🧠 Self-Improving Agent with Advanced Memory Architecture
 
 ## Try Out Live Demo Here:
+
 https://kent-ai-agent.fly.dev/
 <img width="1192" height="651" alt="Screenshot 2025-08-20 at 11 04 58 PM" src="https://github.com/user-attachments/assets/ae1891b9-9d81-4998-9e5e-da8eab694ad4" />
 
@@ -454,10 +455,97 @@ These files ARE tracked and provide the starting structure for new installations
 
 ## 💻 Usage
 
-To run the agent, execute the following command in your terminal:
+### Command Line Interface (CLI)
+
+To run the agent in CLI mode, execute the following command in your terminal:
 
 ```bash
 uv run kent
+```
+
+### Web Interface (Frontend + Backend)
+
+For the full web interface with streaming support, you need to run both the frontend and backend servers:
+
+#### Option 1: Using the Development Script (Recommended)
+```bash
+./dev.sh
+```
+
+#### Option 2: Manual Setup
+1. **Start the backend server:**
+   ```bash
+   cd backend
+   uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+2. **Start the frontend server (in a new terminal):**
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+
+3. **Access the application:**
+   - **Frontend**: http://localhost:3000
+   - **Backend API**: http://localhost:8000
+   - **API Documentation**: http://localhost:8000/docs
+
+## ⚙️ System Walkthrough
+
+```
+I have completed my analysis of the codebase and the `README.md` file, and I've also researched LangGraph. I'm now ready to walk you through the system.
+
+### System Walkthrough
+
+This project is a self-improving AI agent that uses a sophisticated memory architecture to learn and evolve from its conversations. It's built using Python, with LangGraph for creating the agent's reasoning process and Google's Gemini 2.5 Pro as the core language model.
+
+Here’s a high-level breakdown of how it works:
+
+#### 1. Core Components
+
+*   **`main.py`**: This is the entry point of the application. It initializes the `SelfImprovingAgent` and starts a command-line interface for you to interact with it.
+
+*   **`agent.py`**: This is the heart of the agent. It defines the `SelfImprovingAgent` class, which manages the agent's state, orchestrates the various memory and cognitive processes, and uses LangGraph to define its behavior as a state machine.
+
+*   **`memory.py`**: This module handles the agent's memory. It's responsible for creating, loading, and querying the FAISS vector stores that make up the agent's layered memory system. Each memory layer is a separate vector store, allowing for efficient, organized knowledge retrieval.
+
+*   **`config.py`**: This handles loading and saving configuration files, such as `agent_config.json` (which tracks memory layers) and `core_identity.json` (which stores the agent's core traits).
+
+#### 2. The Cognitive Loop (Powered by LangGraph)
+
+The agent's "thinking" process is structured as a graph using LangGraph. A graph is a series of steps (nodes) connected by transitions (edges). The agent moves through this graph each time it receives a message from you.
+
+Here's a simplified overview of the steps in the graph:
+
+1.  **Initial Analysis and Routing (`_initial_analysis_and_routing`)**: When you send a message, this is the first step. The agent analyzes your input for emotional tone and style. It also decides whether it needs to retrieve information from an existing memory layer or if it needs to create a new one because you've introduced a new topic.
+
+2.  **Parallel Memory Retrieval (`_parallel_memory_retrieval`)**: The agent queries multiple memory sources at once to gather context. This includes:
+    *   **Core Beliefs**: Information from its `core_identity.json`.
+    *   **Session Summaries**: Summaries of past conversations.
+    *   **Long-Term Conversational Memory**: The full history of its conversations.
+    *   **Topic-Specific Layer**: If the router decided an existing layer was relevant, it queries that layer.
+
+3.  **Memory Synthesis (`_synthesize_memories`)**: All the retrieved information is synthesized into a single, cohesive summary. This summary also identifies any uncertainties or contradictions in its memory.
+
+4.  **Response Generation (`_generate_response`)**: The agent uses the synthesized memories, the emotional context, and a "self-awareness check" to generate a response. The self-awareness check reminds the agent of its identity and limitations, ensuring its answers are grounded.
+
+5.  **Conscience (`_conscience`)**: Before sending the response, the agent's "conscience" critiques it. It checks if the response is helpful, honest, and incorporates the retrieved memories correctly. If the critique is negative, the agent loops back to the `_generate_response` step to try again.
+
+6.  **Memory Update (`_update_memory`)**: After sending the response, the agent updates its memory. The interaction is summarized and stored in the relevant memory layer, and the full conversation turn is added to the long-term conversational memory.
+
+#### 3. The Layered Memory Architecture
+
+This is the key to the agent's ability to learn and improve.
+
+*   **Dynamic Layer Creation**: If you bring up a new topic, the agent's router triggers the `_propose_new_layer` and `_create_new_layer` nodes in the graph. This creates a new FAISS vector store for that topic. The `agent_config.json` file is updated to include this new layer, and the agent's version number is incremented, marking a permanent expansion of its cognitive architecture.
+
+*   **Types of Memory Layers**:
+    *   **Long-Term Conversational Memory**: A vector store containing every interaction the agent has ever had.
+    *   **Topic-Specific Layers**: These are created dynamically for new topics, allowing for specialized knowledge.
+    *   **Core Identity Layers**: These can store complex concepts like the agent's beliefs, making its identity searchable and scalable.
+    *   **Experience Layer**: This layer stores logs of the agent's internal decision-making processes, allowing it to learn from its successes and failures.
+
+In essence, you are interacting with a stateful agent that doesn't just respond to your queries but actively organizes its knowledge and refines its responses based on a structured, self-critical process. The use of LangGraph allows for this complex, cyclical reasoning, which is a significant step beyond simple prompt-response interactions.
 ```
 
 ## 📜 License
@@ -474,4 +562,5 @@ You can now chat with the agent! 🎉 To see the self-improvement in action, try
 ```
 
 ```
+
 # Test deployment Thu Aug 21 00:14:08 +04 2025

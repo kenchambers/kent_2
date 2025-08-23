@@ -20,11 +20,15 @@ https://kent-ai-agent.fly.dev/
 - [✨ Recent Improvements](#-recent-improvements)
 - [🚀 Getting Started](#-getting-started)
 - [💻 Usage](#-usage)
+- [🏭 Production Infrastructure](#-production-infrastructure)
+- [🌐 Multi-User Web Architecture](#-multi-user-web-architecture)
 - [🔬 Related Scholarly Research Papers](#-related-scholarly-research-papers)
 
 ## 🔍 Overview
 
-This repository contains a Python-based command-line AI agent implementing cutting-edge memory research from 2024. Built on **LangGraph** 🔗 and **Google's Gemini 2.5 Pro** 🤖, the agent features a sophisticated cognitive architecture with self-correction, proactive self-awareness, and a research-backed dual-memory system that dynamically creates new knowledge layers.
+This repository contains a Python-based AI agent implementing cutting-edge memory research from 2024. Built on **LangGraph** 🔗 and **Google's Gemini 2.5 Pro** 🤖, the agent features a sophisticated cognitive architecture with self-correction, proactive self-awareness, and a research-backed dual-memory system that dynamically creates new knowledge layers.
+
+**🌐 Multi-User Ready**: Supports concurrent users through session-isolated conversations, making it suitable for both personal CLI use and production web deployments.
 
 ## 🏗️ Architecture Overview
 
@@ -648,6 +652,8 @@ This script handles dependency checks and ensures both servers are running corre
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 
+**🌐 Multi-User Support**: The web interface supports multiple concurrent users. Each browser session gets a unique session ID, enabling isolated conversations while sharing the same knowledge base. Multiple people can chat with the agent simultaneously without conversation mixing.
+
 ## ⚙️ System Walkthrough
 
 ```
@@ -735,6 +741,54 @@ The production environment automatically processes conversation data to build co
 - **Monitoring**: Cron logs available via `flyctl logs -i <cron_machine_id>`
 
 This infrastructure ensures the agent continuously evolves its wisdom while maintaining strict privacy boundaries, all without manual intervention.
+
+## 🌐 Multi-User Web Architecture
+
+The agent supports **full concurrent multi-user functionality** through sophisticated session isolation mechanisms, allowing multiple users to interact simultaneously without conversation interference.
+
+### 👥 **Session Isolation System**
+
+**🔑 Session-Keyed State Management**: Each user gets completely isolated conversation state:
+
+```python
+# Per-user isolated state
+session_histories[user_session_id]        # Individual conversation history
+session_working_memories[user_session_id] # Per-user working memory
+session_short_summaries[user_session_id]  # User-specific summaries
+session_start_times[user_session_id]      # Session timing data
+```
+
+### 🛡️ **Concurrency Safety**
+
+**Thread-Safe Design**: Multiple users can chat simultaneously through:
+- **LangGraph Thread Isolation**: Each session uses unique `thread_id` for state checkpointing
+- **Session-Scoped Memory**: Working memory and conversation history isolated per session
+- **Shared Knowledge Base**: All users share the same vector stores efficiently
+- **Independent Processing**: Each user's conversation flows independently
+
+### 🔄 **How It Works**
+
+1. **Session Creation**: Frontend generates unique session ID (`session_${timestamp}_${randomId}`)
+2. **State Isolation**: Agent creates separate state dictionaries for each session
+3. **Memory Retrieval**: Each session queries shared vector stores with isolated context
+4. **Response Generation**: LangGraph processes each session in separate threads
+5. **State Persistence**: Session summaries and archives saved with session-specific metadata
+
+### ⚡ **Performance Benefits**
+
+- **Efficient Resource Usage**: Single agent instance serves all users
+- **Shared Vector Stores**: Memory layers accessed concurrently without duplication
+- **Parallel Processing**: Multiple conversations processed simultaneously
+- **Automatic Cleanup**: Inactive sessions gracefully summarized and archived
+
+### 🔒 **Privacy Guarantees**
+
+- **Complete Isolation**: Users cannot access each other's conversations
+- **Session-Specific Archives**: Conversation histories stored separately by session ID
+- **Isolated Working Memory**: Temporary facts and context never shared between users
+- **Independent Summarization**: Each session gets its own summary and archival process
+
+This architecture enables the agent to serve as a **true multi-user conversational AI** while maintaining the sophisticated memory and learning capabilities that make each conversation feel personal and contextually aware.
 
 ## 🔬 Related Scholarly Research Papers
 

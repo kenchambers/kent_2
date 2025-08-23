@@ -280,6 +280,18 @@ When the agent encounters a new domain (like "quantum physics" or "medieval hist
 
 The result is a system that literally grows more intelligent through use, developing new cognitive capacities that persist across all future interactions. The version number in `agent_config.json` serves as a record of this cognitive evolution, tracking each expansion of the agent's architectural sophistication. 📈
 
+### ⚡ Adaptive Memory Retrieval
+
+To enhance responsiveness, the agent fine-tunes the memory retrieval process itself to be more dynamic.
+
+**Dynamic `nprobe` for FAISS**: The FAISS vector search has a parameter called `nprobe` that controls how many nearby vector clusters to search. A higher `nprobe` is more accurate but slower. The agent now implements an adaptive system:
+
+1.  **Fast Initial Search**: It starts with a very low, fast `nprobe` value (`nprobe=1`) for the initial query.
+2.  **Confidence Check**: It then assesses the confidence score of the best result.
+3.  **Thorough Re-Search**: If the confidence is low (i.e., the score is above a certain threshold), it automatically re-runs the search with a much higher `nprobe` value (`nprobe=10`) to get a more accurate result.
+
+This ensures that simple, clear queries get a very fast response, while more ambiguous or complex queries still get the accuracy they need without slowing down the common case. This makes the agent feel significantly more responsive, especially during extended conversations, without compromising the depth of its cognitive and memory capabilities.
+
 ### ⏱️ Time Complexity Analysis (Big O)
 
 Based on the architecture described in this document, here is the Big O notation complexity for the query layer and an explanation of how processing time is affected as new layers are added.

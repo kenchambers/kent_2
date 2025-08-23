@@ -51,29 +51,53 @@ def add_to_memory(vector_store: FAISS, text: str, path: str, metadata: Optional[
     vector_store.save_local(path)
 
 
-def query_memory(vector_store: FAISS, query: str, k: int = 40, threshold: float = None) -> List[Document]:
+def query_memory(
+    vector_store: FAISS,
+    query: str,
+    k: int = 40,
+    threshold: float = None,
+    initial_nprobe: int = 1,
+    high_nprobe: int = 10,
+    confidence_threshold: float = 0.6,
+) -> List[Document]:
     """
-    Queries the vector store for relevant information.
+    Queries the vector store for relevant information using an adaptive nprobe.
     Returns a list of Document objects, including their metadata.
-    
+
     Args:
-        vector_store: The FAISS vector store to query
-        query: The query string
-        k: Maximum number of results to retrieve (default 40)
-        threshold: Optional similarity threshold (if provided, only returns results above this score)
+        vector_store: The FAISS vector store to query.
+        query: The query string.
+        k: Maximum number of results to retrieve.
+        threshold: Optional similarity score threshold.
+        initial_nprobe: The nprobe value for the initial, fast search.
+        high_nprobe: The nprobe value for the slower, more accurate search.
+        confidence_threshold: The score threshold to trigger the more accurate search.
     """
-    # Try to get many relevant memories
     try:
-        if threshold:
-            # Get results with scores
+        # Set nprobe for the initial fast search
+        if hasattr(vector_store.index, "nprobe"):
+            vector_store.index.nprobe = initial_nprobe
+
+        docs_and_scores = vector_store.similarity_search_with_score(query, k=k)
+
+        # If the best score is not good enough, perform a more thorough search
+        if (
+            docs_and_scores
+            and docs_and_scores[0][1] > confidence_threshold
+            and hasattr(vector_store.index, "nprobe")
+        ):
+            vector_store.index.nprobe = high_nprobe
             docs_and_scores = vector_store.similarity_search_with_score(query, k=k)
-            # Filter by threshold (lower scores are better in FAISS)
+
+        # Filter by threshold if provided
+        if threshold:
             docs = [doc for doc, score in docs_and_scores if score <= threshold]
         else:
-            docs = vector_store.similarity_search(query, k=k)
-    except:
-        # Fallback if the vector store is small
+            docs = [doc for doc, _ in docs_and_scores]
+
+    except Exception:
+        # Fallback for small or problematic vector stores
         docs = vector_store.similarity_search(query, k=min(k, 5))
-    
+
     # Filter out the default "initial document"
     return [doc for doc in docs if doc.page_content not in ("__EMPTY_STORE_PLACEHOLDER__", "initial document")]

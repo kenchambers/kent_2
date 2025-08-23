@@ -952,6 +952,15 @@ Example for a response needing revision:
     def _build_response_context(self, state: AgentState) -> str:
         """Helper function to build the context string for response generation."""
         context = ""
+
+        # Add the immediate last exchange to prevent repetition
+        if state.get("conversation_history") and len(state["conversation_history"]) > 1:
+            last_agent_message = state["conversation_history"][-1]
+            last_user_message = state["conversation_history"][-2]
+            context += "\n--- PREVIOUS EXCHANGE (FOR CONTEXT) ---\n"
+            context += f"User: \"{last_user_message['content']}\"\n"
+            context += f"You (Agent): \"{last_agent_message['content']}\"\n"
+            context += "--- END PREVIOUS EXCHANGE ---\n"
         
         # Add working memory context
         if state.get("working_memory"):
@@ -1114,16 +1123,19 @@ Example for a response needing revision:
                     response = f"Hey there! Yes, I'm {agent_name}. How can I help you today?"
                 else:
                     response = "Hey there! How can I help you today?"
-            else:
-                response = "Hey there! How can I help you today?"
             
             self.current_session_history.append({"role": "user", "content": user_input})
             self.current_session_history.append({"role": "agent", "content": response})
             return response
         
+        # Keep the conversation history within the window size
+        history_window = self.current_session_history[
+            -self.conversation_window_size*2:
+        ] if self.conversation_window_size > 0 else self.current_session_history
+
         initial_state = {
             "user_input": user_input,
-            "conversation_history": self.current_session_history,  # Only current session
+            "conversation_history": history_window,  # Pass the windowed history
             "short_term_summary": self.short_term_summary,
 
             "semantic_cache": {},
@@ -1196,9 +1208,14 @@ Example for a response needing revision:
             yield {"type": "response", "content": response}
             return
 
+        # Keep the conversation history within the window size
+        history_window = self.current_session_history[
+            -self.conversation_window_size*2:
+        ] if self.conversation_window_size > 0 else self.current_session_history
+
         initial_state = {
             "user_input": user_input,
-            "conversation_history": self.current_session_history,  # Only current session
+            "conversation_history": history_window, # Pass the windowed history
             "short_term_summary": self.short_term_summary,
 
             "semantic_cache": {},

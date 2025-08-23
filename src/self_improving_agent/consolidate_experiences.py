@@ -14,7 +14,8 @@ from langchain_core.messages import HumanMessage
 from langchain_core.documents import Document
 
 # --- CONFIGURATION ---
-ARCHIVE_DIR = config.PROJECT_ROOT / "conversation_archives"
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+ARCHIVE_DIR = PROJECT_ROOT / "backend" / "conversation_archives"
 PROCESSED_DIR = ARCHIVE_DIR / "processed"
 SHARED_EXPERIENCES_VS_PATH = str(config.VECTOR_STORES_DIR / "shared_experiences.faiss")
 LLM = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", google_api_key=config.load_api_key())

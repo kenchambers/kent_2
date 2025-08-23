@@ -211,8 +211,10 @@ class SelfImprovingAgent:
 
         ROUTING GUIDELINES:
         - Create "new_layer" for specific technical topics, hobbies, or specialized subjects (e.g., astrophotography, quantum physics, cooking techniques, specific games, etc.)
+        - For questions about beliefs, values, ethics, philosophy, or the agent's identity/purpose, ALWAYS check existing belief layers (don't use "none" action)
         - Use "general_knowledge" ONLY for very broad, general questions or simple greetings
         - If the user introduces a specific technique, method, or specialized topic, prefer "new_layer"
+        - When asking about the agent's opinions, beliefs, or philosophical stance, this requires memory retrieval, not "none"
         - When in doubt between an existing layer and creating a new one, prefer creating a new layer for better organization
 
         Example JSON response:

@@ -4,7 +4,7 @@ primary_region = "iad"
 
 [processes]
   app = "uvicorn backend.main:app --host 0.0.0.0 --port 8000"
-  cron = "uv run consolidate-experiences"
+  cron = "python -m self_improving_agent.consolidate_experiences"
 
 [schedules]
   daily_consolidation = { schedule = "daily", process = "cron" }

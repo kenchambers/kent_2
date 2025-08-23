@@ -321,11 +321,22 @@ class SelfImprovingAgent:
                         retrieved_beliefs.extend(retrieved_info)
         return retrieved_beliefs
 
-    async def _get_shared_experiences(self, user_input: str) -> List[Document]:
-        """Helper to retrieve from the shared experiences vector store."""
+    async def _get_shared_experiences(self, state: AgentState) -> List[Document]:
+        """Helper to retrieve from the shared experiences vector store using a broader context."""
         log_thinking("--- Querying Shared Experiences & Wisdom ---")
+        user_input = state["user_input"]
+        working_memory = state.get("working_memory", {})
+        topic = working_memory.get("topic")
+
+        # Create a broader query that includes the general topic
+        if topic:
+            query = f"{user_input} (related to the topic of {topic})"
+        else:
+            query = user_input
+
+        log_thinking(f"--- Shared experiences query: '{query}' ---")
         try:
-            return await self.shared_experiences.asimilarity_search(user_input, k=3)
+            return await self.shared_experiences.asimilarity_search(query, k=3)
         except Exception as e:
             log_thinking(f"Error querying shared experiences: {e}")
             return []
@@ -354,7 +365,7 @@ class SelfImprovingAgent:
             "beliefs": self._get_core_beliefs(user_input),
             "sessions": self._get_session_summaries(user_input),
             "dynamic": self._get_dynamic_memory(state),
-            "experiences": self._get_shared_experiences(user_input),
+            "experiences": self._get_shared_experiences(state),
         }
 
         if active_layer and not state["needs_new_layer"]:
@@ -1061,7 +1072,7 @@ Example for a response needing revision:
             "- Who are you? (A self-improving AI, version "
             f"{self.config['version']})\n"
             "- What are your capabilities and limitations? (Access to layered "
-            "memory, ability to learn, but NO internet access, no web search, "
+            "memory, ability to learn from all conversations to build collective wisdom, but NO internet access, no web search, "
             "no ability to browse websites or fetch external information, "
             "and no true consciousness or feelings)\n"
             "- How does the user's query relate to your nature as an AI?\n"

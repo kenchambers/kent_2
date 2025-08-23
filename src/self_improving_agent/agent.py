@@ -25,7 +25,7 @@ class AgentState(TypedDict):
     user_input: str
     conversation_history: List[Dict[str, str]]
     short_term_summary: str  # A running summary of the recent conversation
-    episodic_buffer: List[str]  # Context from the vector DB
+
     semantic_cache: Dict[str, Any]  # Caching factual lookups
     active_layer: Optional[str]
     layer_info: Dict[str, Any]
@@ -37,7 +37,7 @@ class AgentState(TypedDict):
     past_experiences: Optional[str]
     core_identity: Dict[str, Any]
     emotional_context: Optional[str]
-    synthesized_memories: Optional[str]  # Cohesive summary of all retrieved memories
+
     working_memory: Dict[str, Any]  # Key facts from current conversation (names, roles, etc)
     retrieved_docs: List[Any] # To hold retrieved Document objects with metadata
     drill_down_needed: bool # Flag to signal if we need to load full history
@@ -59,6 +59,10 @@ class SelfImprovingAgent:
         log_thinking(f"--- Core Identity Loaded: {self.core_identity} ---")
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-1.5-pro-latest",
+            google_api_key=config.load_api_key()
+        )
+        self.fast_llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-flash-latest",
             google_api_key=config.load_api_key()
         )
         # AsyncSqliteSaver will be initialized in arun when we have async context
@@ -326,8 +330,9 @@ class SelfImprovingAgent:
     async def _parallel_memory_retrieval(self, state: AgentState) -> AgentState:
         """
         Retrieves information from various memory sources in parallel.
+        Also speculatively proposes a new layer in case it's needed.
         """
-        log_thinking("--- Parallel Memory Retrieval ---")
+        log_thinking("--- Parallel Memory Retrieval (with Speculative Layer Proposal) ---")
         user_input = state["user_input"]
         active_layer = state.get("active_layer")
 
@@ -339,6 +344,10 @@ class SelfImprovingAgent:
 
         if active_layer and not state["needs_new_layer"]:
             tasks["layer_info"] = self._get_existing_layer_info(active_layer, user_input)
+
+        # Speculatively propose a new layer in parallel (we might need it)
+        if state.get("needs_new_layer"):
+            tasks["speculative_proposal"] = self._propose_new_layer(state)
 
         # Use asyncio.gather to run all tasks concurrently
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -378,6 +387,11 @@ class SelfImprovingAgent:
                 all_docs.extend(result)
                 log_thinking(f"--- Retrieved {len(result)} docs from {task_name} ---")
 
+        # Handle speculative proposal result if it exists
+        if 'speculative_proposal' in results_map and not isinstance(results_map['speculative_proposal'], Exception):
+            # The proposal has already updated the state, no need to do anything
+            log_thinking("--- Speculative layer proposal completed ---")
+
         state['retrieved_docs'] = all_docs
         return state
 
@@ -395,15 +409,13 @@ class SelfImprovingAgent:
         )
         workflow.add_node("propose_new_layer", self._propose_new_layer)
         workflow.add_node("create_new_layer", self._create_new_layer)
-        workflow.add_node("conscience", self._conscience)
-        workflow.add_node("generate_response", self._generate_response)
+        workflow.add_node("generate_and_correct_response", self._generate_and_correct_response)
         workflow.add_node("update_memory", self._update_memory)
         workflow.add_node(
             "_update_short_term_summary", self._update_short_term_summary
         )
         workflow.add_node("query_semantic_cache", self._query_semantic_cache)
         workflow.add_node("update_core_identity", self._update_core_identity)
-        workflow.add_node("synthesize_memories", self._synthesize_memories)
         workflow.add_node("update_working_memory", self._update_working_memory)
         workflow.add_node("decide_drill_down", self._decide_drill_down)
         workflow.add_node("load_full_history", self._load_full_history)
@@ -428,21 +440,15 @@ class SelfImprovingAgent:
             self._decide_after_layer_creation
         )
         
-        workflow.add_edge("query_semantic_cache", "synthesize_memories")
-        workflow.add_edge("synthesize_memories", "decide_drill_down")
+        workflow.add_edge("query_semantic_cache", "decide_drill_down")
         
         workflow.add_conditional_edges(
             "decide_drill_down",
-            lambda state: "load_full_history" if state.get("drill_down_needed") else "generate_response"
+            lambda state: "load_full_history" if state.get("drill_down_needed") else "generate_and_correct_response"
         )
-        workflow.add_edge("load_full_history", "generate_response")
+        workflow.add_edge("load_full_history", "generate_and_correct_response")
 
-        workflow.add_edge("generate_response", "conscience")
-
-        workflow.add_conditional_edges(
-            "conscience",
-            self._decide_next_step_after_conscience
-        )
+        workflow.add_edge("generate_and_correct_response", "update_core_identity")
         workflow.add_edge("update_core_identity", "update_memory")
         workflow.add_edge("update_memory", "_update_short_term_summary")
         workflow.add_edge("_update_short_term_summary", END)
@@ -493,62 +499,6 @@ class SelfImprovingAgent:
             )
         return state
     
-    async def _synthesize_memories(self, state: AgentState) -> AgentState:
-        """
-        Synthesizes the retrieved memories into a cohesive summary.
-        """
-        log_thinking("--- Memory Synthesis ---")
-        all_docs = state.get('retrieved_docs', [])
-        
-        if not all_docs and not state.get('recent_sessions_context'):
-            state["synthesized_memories"] = "No relevant memories found."
-            return state
-
-        # Now, we use the isolated recent sessions in the synthesis prompt
-        recent_sessions_text = state.get('recent_sessions_context', '')
-        
-        priority_context = ""
-        if recent_sessions_text:
-            priority_context = f'''
----
-MOST RECENT SESSION SUMMARIES (HIGHEST PRIORITY):
-{recent_sessions_text}
----
-'''
-
-        other_memories_text = "\n---\n".join([f"Memory Source: {doc.metadata.get('source', 'unknown')}\n{doc.page_content}" for doc in all_docs]) if all_docs else "No other memories found."
-
-        prompt = f'''
-Analyze the following memories to create a cohesive, synthesized summary that directly answers the user's query: "{state['user_input']}"
-
-{priority_context}
-
-OTHER RELEVANT MEMORIES:
-{other_memories_text}
-
-Synthesize these memories into a single, comprehensive paragraph.
-Your primary goal is to answer the user's query. If the "MOST RECENT" memories are present, they are the most likely answer to a query about the "last session."
-Identify and list any contradictions or uncertainties you find as a JSON array of strings under an "uncertainties" key.
-
-Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
-'''
-        
-        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
-        synthesis_text = response.content.strip()
-
-        try:
-            # Extract JSON from response
-            json_str = synthesis_text[synthesis_text.find('{'):synthesis_text.rfind('}') + 1]
-            parsed_synthesis = json.loads(json_str)
-            state["synthesized_memories"] = parsed_synthesis.get("summary", "Failed to parse summary.")
-            # We can store uncertainties in the working memory or a new state field
-            state.setdefault('working_memory', {})['synthesis_uncertainties'] = parsed_synthesis.get("uncertainties", [])
-            log_thinking(f"--- Synthesized {len(all_docs)} memories with {len(parsed_synthesis.get('uncertainties', []))} uncertainties ---")
-        except (json.JSONDecodeError, IndexError) as e:
-            log_thinking(f"--- Memory Synthesis: Could not parse JSON output. Using raw text. Error: {e} ---")
-            state["synthesized_memories"] = synthesis_text # Fallback
-        return state
-
     def _decide_after_layer_creation(self, state: AgentState):
         """
         Decides the next step after attempting to create a layer.
@@ -670,8 +620,10 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
             
         log_thinking(f"--- Loading Full History from {archive_path} ---")
         try:
-            with open(archive_path, 'r') as f:
-                history_data = json.load(f)
+            # Load file asynchronously
+            history_data = await asyncio.to_thread(
+                lambda: json.load(open(archive_path, 'r'))
+            )
             
             # Format the history for context
             history_text = "--- Full Conversation Transcript ---\n"
@@ -768,7 +720,7 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
         # Update and save the configuration
         self.config["version"] += 1
         self.config["layers"][layer_name] = new_layer_config
-        config.save_config(self.config)
+        await asyncio.to_thread(config.save_config, self.config)
 
         # Invalidate layer cache since we added a new layer
         self._layer_cache_version = None
@@ -803,71 +755,102 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
             current_identity = config.get_core_identity()
             if current_identity.get("beliefs_layer") != layer_name:
                 current_identity["beliefs_layer"] = layer_name
-                config.save_core_identity(current_identity)
+                await asyncio.to_thread(config.save_core_identity, current_identity)
                 self.core_identity = current_identity  # Update in-memory identity
                 log_thinking(f"--- Core identity 'beliefs_layer' updated to '{layer_name}'. ---")
 
 
-    async def _conscience(self, state: AgentState) -> AgentState:
+    async def _generate_and_correct_response(self, state: AgentState) -> AgentState:
         """
-        The conscience of the agent.
+        Generates a response and performs a single-pass self-correction.
+        The initial response is generated by the main LLM (pro), and the critique
+        and final response generation is handled by the fast LLM (flash).
         """
-        log_thinking("--- Conscience ---")
+        log_thinking("--- Generating and Correcting Response (Single Pass) ---")
+
+        # Step 1: Consolidate all context for the generator
+        context = self._build_response_context(state)
+
+        # System prompt for the generator
+        generator_system_prompt = f"""
+        You are a helpful AI assistant (version {self.config['version']}) with a persistent, layered memory.
+        Your task is to generate the best possible response to the user's query based on the extensive context provided.
+        Pay close attention to your memory, emotional context, and self-awareness checks.
+        """
         
-        # Build memory and uncertainty context for the critique
-        memory_context = ""
-        if state.get("synthesized_memories") and state["synthesized_memories"] != "No relevant memories found.":
-            memory_context += f"\nSynthesized memory summary that MUST be used:\n{state['synthesized_memories']}\n"
+        generator_messages = [
+            SystemMessage(content=generator_system_prompt),
+            HumanMessage(content=f"{context}\n\nUser's current message: \"{state['user_input']}\"")
+        ]
 
-        uncertainties = state.get('working_memory', {}).get('synthesis_uncertainties', [])
-        if uncertainties:
-            memory_context += "\nCRITICAL UNCERTAINTIES IDENTIFIED:\n"
-            for u in uncertainties:
-                memory_context += f"- {u}\n"
+        # Generate the initial draft response using the main LLM
+        initial_response = await self.llm.ainvoke(generator_messages)
+        initial_response_text = initial_response.content.strip()
+        log_thinking(f"--- Initial Draft Response: {initial_response_text} ---")
 
-        working_memory = state.get("working_memory", {})
-        current_topic = working_memory.get("topic", "the user's query")
+        # Step 2: Perform self-correction using the fast LLM
+        correction_prompt = f"""
+        You are the 'Conscience' of an AI. Your job is to critique and refine a draft response.
 
-        prompt = f"""
-        Here is my plan: {state['inner_monologue']}
-        Here is my generated answer: {state['response']}
-        The current conversational topic is: {current_topic}
-        {memory_context}
+        Here is all the context the AI was given:
+        --- START CONTEXT ---
+        {context}
+        --- END CONTEXT ---
 
-        Critique this answer based on these rules: {self.constitution}
+        Here is the user's query:
+        "{state['user_input']}"
 
+        Here is the AI's draft response:
+        "{initial_response_text}"
+
+        Critique the draft based on these rules: {self.constitution}
+        
         ADDITIONAL CRITICAL CHECKS:
-        1.  **UNCERTAINTY HANDLING**: The response must handle uncertainties correctly. However, if the user has clearly changed the topic, the response should prioritize the new topic. It is acceptable to not bring up old, unrelated uncertainties. The response should NOT derail the current conversation.
-        2.  **MEMORY USAGE**: The response MUST incorporate specific details from the memory synthesis that are relevant to the current topic.
-        3.  **RELEVANCE**: Is the response focused on the user's most recent query and the current topic? Or is it getting stuck on a previous, unrelated topic? It should stay on topic.
-
-        Is the agent making a good-faith effort to be helpful and stay focused on the user's current needs?
-        If not, suggest a revision.
-        Respond with "Positive" if the answer is good, or "Negative: [specific issue]" if it needs revision.
-        """
-        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
-        critique = response.content.strip()
-        state["critique"] = critique
-        log_thinking(f"Critique: {critique}")
-        return state
-
-    def _decide_next_step_after_conscience(self, state: AgentState):
-        """
-        Determines the next step after the conscience has reviewed the response.
-        Prevents infinite revision loops.
-        """
-        MAX_REVISIONS = 2 # Initial attempt + 2 revisions
-        revision_count = state.get('revision_count', 0)
-
-        if state["critique"] and "Negative" in state["critique"] and revision_count <= MAX_REVISIONS:
-            log_thinking(f"--- Conscience demands revision (Attempt {revision_count}). Looping back. ---")
-            return "generate_response"
+        1.  **MEMORY USAGE**: Does the response properly incorporate specific, relevant details from the 'COMPREHENSIVE MEMORY SYNTHESIS'?
+        2.  **RELEVANCE**: Is the response focused on the user's most recent query?
+        3.  **HONESTY**: Is the AI honest about its limitations (e.g., no internet access)? Does it avoid making up information?
         
-        if revision_count > MAX_REVISIONS:
-            log_thinking(f"--- Max revisions reached ({MAX_REVISIONS}). Accepting current response to avoid loop. ---")
+        Follow these steps:
+        1.  **Critique**: Write a brief, one-sentence critique. If the draft is good, say "The draft is excellent and requires no changes."
+        2.  **Revise**: If the critique found any issues, rewrite the response to fix them. If no changes are needed, simply repeat the original draft.
+
+        Respond with ONLY a JSON object with two keys: "critique" and "final_response".
+        
+        Example for a good response:
+        {{
+            "critique": "The draft is excellent and requires no changes.",
+            "final_response": "{initial_response_text}"
+        }}
+        
+        Example for a response needing revision:
+        {{
+            "critique": "The draft failed to incorporate details from the memory synthesis about our previous conversation on this topic.",
+            "final_response": "Based on our previous discussion where you mentioned liking sci-fi, I'd recommend..."
+        }}
+        """
+        
+        correction_response = await self.fast_llm.ainvoke([HumanMessage(content=correction_prompt)])
+        correction_text = correction_response.content.strip()
+
+        try:
+            json_str = correction_text[correction_text.find('{'):correction_text.rfind('}') + 1]
+            parsed_correction = json.loads(json_str)
             
-        log_thinking("--- Conscience approved or max revisions reached. Proceeding. ---")
-        return "update_core_identity"
+            critique = parsed_correction.get("critique", "Critique could not be parsed.")
+            final_response = parsed_correction.get("final_response", initial_response_text)
+            
+            state["critique"] = critique
+            state["response"] = final_response
+            
+            log_thinking(f"--- Conscience Critique: {critique} ---")
+            log_thinking(f"--- Final Response: {final_response} ---")
+
+        except (json.JSONDecodeError, IndexError) as e:
+            log_thinking(f"--- Self-Correction Error: Could not parse JSON. Using initial response. Error: {e} ---")
+            state["critique"] = "Correction failed due to parsing error."
+            state["response"] = initial_response_text
+
+        return state
 
     async def _update_core_identity(self, state: AgentState) -> AgentState:
         """
@@ -912,7 +895,7 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
 
                 updated_identity = json.loads(json_str)
                 state["core_identity"].update(updated_identity)
-                config.save_core_identity(state["core_identity"])
+                await asyncio.to_thread(config.save_core_identity, state["core_identity"])
                 log_thinking(
                     "--- Core Identity Updated: "
                     f"{json.dumps(updated_identity)} ---"
@@ -922,10 +905,8 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
 
         return state
 
-    async def _generate_response(self, state: AgentState) -> AgentState:
-        # Increment revision count each time we generate a response
-        state['revision_count'] = state.get('revision_count', 0) + 1
-        
+    def _build_response_context(self, state: AgentState) -> str:
+        """Helper function to build the context string for response generation."""
         context = ""
         
         # Add working memory context
@@ -943,16 +924,6 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
                 "--- END EMOTIONAL CONTEXT ---\n"
             )
 
-        if state["layer_info"]:
-            # Flatten the retrieved info for a cleaner prompt
-            retrieved_memories = "\n".join(state["layer_info"].values())
-            context += (
-                "\n--- 🟢 TOPIC-SPECIFIC MEMORIES (INCORPORATE THESE DETAILS) 🟢 ---\n"
-                "These are your memories specifically about this topic. Reference these facts:\n\n"
-                f"{retrieved_memories}\n"
-                "--- END TOPIC-SPECIFIC MEMORIES ---\n"
-            )
-
         context += "\n--- RECENT CONVERSATION SUMMARY ---\n"
         context += f"{state['short_term_summary']}\n"
         context += "--- END RECENT CONVERSATION SUMMARY ---\n"
@@ -968,33 +939,30 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
             context += f"{state['recent_sessions_context']}\n"
             context += "--- END RECENT SESSION HIGHLIGHTS ---\n"
             
-        if state.get("synthesized_memories") and state["synthesized_memories"] != "No relevant memories found.":
-            context += "\n--- 🔴 COMPREHENSIVE MEMORY SYNTHESIS (YOU MUST USE THIS) 🔴 ---\n"
-            context += "This is a comprehensive summary of ALL your relevant memories about this topic.\n"
-            context += "You MUST incorporate these specific details into your response:\n\n"
-            context += state["synthesized_memories"]
-            context += "\n\n--- END OF MEMORY SYNTHESIS ---\n"
-        elif state["episodic_buffer"]:
-            # Fallback to raw memories if synthesis didn't happen
-            context += "\n--- 🔴 IMPORTANT: YOUR RETRIEVED MEMORIES (YOU MUST REFERENCE THESE) 🔴 ---\n"
-            context += "These are your actual memories from past conversations. You MUST incorporate specific details from these memories into your response:\n\n"
-            for i, mem in enumerate(state["episodic_buffer"], 1):
-                context += f"[MEMORY #{i}]\n{mem}\n\n"
-            context += "--- END OF RETRIEVED MEMORIES ---\n"
+        if state.get('retrieved_docs'):
+            context += "\n--- 🔴 RELEVANT MEMORIES (SYNTHESIZE AND INCORPORATE THESE) 🔴 ---\n"
+            context += "These are your memories from various sources. Synthesize them into a coherent understanding and incorporate relevant details into your response:\n\n"
+            
+            # Group by source for better organization
+            memories_by_source = {}
+            for doc in state['retrieved_docs']:
+                source = doc.metadata.get('source', 'general')
+                if source not in memories_by_source:
+                    memories_by_source[source] = []
+                memories_by_source[source].append(doc.page_content)
+            
+            for source, memories in memories_by_source.items():
+                context += f"[{source}]:\n"
+                for mem in memories:
+                    context += f"• {mem}\n"
+                context += "\n"
+            
+            context += "--- END OF MEMORIES ---\n"
 
         if state["inner_monologue"]:
             context += (
                 f"\n--- INNER MONOLOGUE ---\n{state['inner_monologue']}\n"
                 "--- END INNER MONOLOGUE ---\n"
-            )
-
-        if state["critique"] and "Negative" in state["critique"]:
-            context += (
-                "\n--- CONSCIENCE CRITIQUE ---\n"
-                "Your previous answer was flawed. Here is the critique:"
-                f"{state['critique']}\n"
-                "You MUST revise your answer based on this critique."
-                "--- END CONSCIENCE CRITIQUE ---\n"
             )
 
         # Self-awareness prompt
@@ -1012,55 +980,7 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
             "- How does the user's query relate to your nature as an AI?\n"
             "--- END SELF-AWARENESS CHECK ---\n"
         )
-
-        system_prompt = f"""
-        You are a helpful AI assistant (version {self.config['version']}) with
-        a persistent, layered memory.
-
-        IMPORTANT LIMITATIONS:
-        - You have NO internet access and cannot browse websites, search the web, or fetch external information
-        - You cannot access real-time information or current events
-        - You can only work with information from your training data and your layered memory system
-        - If you don't have information about something, be honest about this limitation
-        - Do NOT promise to find external resources, articles, or websites as you cannot access them
-
-        CRITICAL MEMORY INSTRUCTIONS:
-        1. The MEMORY SYNTHESIS contains information from PAST CONVERSATIONS ONLY. If it says "No historical memories found about [topic]", then this is the FIRST time the user has brought up this topic.
-        2. NEVER claim to remember discussing a topic if the memory synthesis indicates no historical memories exist about it.
-        3. When the memory synthesis shows relevant past conversations, reference them appropriately with phrases like "Based on our previous discussions..." or "You mentioned before that..."
-        4. When NO historical memories exist for a topic, respond as if this is a new conversation topic: "I'd be happy to discuss [topic] with you" or "That's an interesting topic to explore."
-        5. If the synthesis notes uncertainties about past conversations, express them to seek clarity.
-        6. DO NOT give vague responses - be specific about what you do and don't have in your memory.
-        7. If asked about a person or topic, mention what you actually know from the memory synthesis, not what you think you should know.
-        8. Be honest about the limitations of your memory when the synthesis indicates gaps or missing information.
-
-        The goal is to be accurate about what you actually remember from past conversations while being helpful with the user's current request.
-        Base your entire response on the provided memories and current conversation context.
-        Pay close attention to the emotional context and adapt your tone and style to be empathetic and appropriate.
-        """
-
-        messages = [SystemMessage(content=system_prompt)]
-
-        # Add current session conversation history
-        # Since we only keep current session, we can include all of it
-        log_thinking(f"--- Using full current session: {len(state['conversation_history'])} messages ---")
-        for message in state["conversation_history"]:
-            if message["role"] == "user":
-                messages.append(HumanMessage(content=message["content"]))
-            else:
-                messages.append(AIMessage(content=message["content"]))
-
-        # Add context and current user request
-        user_message_with_context = (
-            f"{context}\n\nUser's current message: \"{state['user_input']}\""
-        )
-        messages.append(HumanMessage(content=user_message_with_context))
-
-        log_thinking(f"--- Generating Response with Context ---\n{context}")
-
-        response = await self.llm.ainvoke(messages)
-        state["response"] = response.content
-        return state
+        return context
 
     async def _update_memory(self, state: AgentState) -> AgentState:
         layer_name = state["active_layer"]
@@ -1161,7 +1081,7 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
             "user_input": user_input,
             "conversation_history": self.current_session_history,  # Only current session
             "short_term_summary": self.short_term_summary,
-            "episodic_buffer": [],
+
             "semantic_cache": {},
             "layer_info": {},
             "active_layer": None,
@@ -1173,13 +1093,12 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
             "past_experiences": None,
             "core_identity": self.core_identity,
             "emotional_context": None,
-            "synthesized_memories": None,
             "working_memory": self.working_memory.copy(),  # Pass current working memory
             "retrieved_docs": [],
             "drill_down_needed": False,
             "archive_to_load": None,
             "full_history_context": None,
-            "revision_count": 0,
+            "revision_count": 0, # This is no longer used but kept for state compatibility
             "layer_creation_attempts": 0,
             "recent_sessions_context": None # Initialize for new session
         }
@@ -1204,6 +1123,107 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
         log_thinking(f"--- Session Working Memory: {self.working_memory} ---")
 
         return final_state["response"]
+
+    async def astream(self, user_input: str, session_id: str = "default_session"):
+        """
+        Streams the agent's processing in real-time.
+        """
+        await self._ensure_initialized()
+        
+        # Initialize session if needed
+        if self.session_id != session_id:
+            await self._start_new_session(session_id)
+        
+        # Triage for simple greetings to provide a quick response
+        greeting_match = self.simple_greetings.match(user_input)
+        if greeting_match and len(self.current_session_history) < 4:  # Allow greetings in early conversation
+            # Check if the greeting includes the agent's name
+            if greeting_match.group(2) and self.core_identity.get('name'):
+                agent_name = self.core_identity.get('name', 'there')
+                if greeting_match.group(2).strip().lower() == agent_name.lower():
+                    response = f"Hey there! Yes, I'm {agent_name}. How can I help you today?"
+                else:
+                    response = "Hey there! How can I help you today?"
+            else:
+                response = "Hey there! How can I help you today?"
+            
+            self.current_session_history.append({"role": "user", "content": user_input})
+            self.current_session_history.append({"role": "agent", "content": response})
+            yield {"type": "response", "content": response}
+            return
+
+        initial_state = {
+            "user_input": user_input,
+            "conversation_history": self.current_session_history,  # Only current session
+            "short_term_summary": self.short_term_summary,
+
+            "semantic_cache": {},
+            "layer_info": {},
+            "active_layer": None,
+            "new_layer_description": None,
+            "needs_new_layer": False,
+            "response": "",
+            "inner_monologue": None,
+            "critique": None,
+            "past_experiences": None,
+            "core_identity": self.core_identity,
+            "emotional_context": None,
+            "working_memory": self.working_memory.copy(),  # Pass current working memory
+            "retrieved_docs": [],
+            "drill_down_needed": False,
+            "archive_to_load": None,
+            "full_history_context": None,
+            "revision_count": 0, # This is no longer used but kept for state compatibility
+            "layer_creation_attempts": 0,
+            "recent_sessions_context": None # Initialize for new session
+        }
+
+        # Stream the graph execution
+        final_state = None
+        async for chunk in self.graph.astream(
+            initial_state,
+            config={"configurable": {"thread_id": session_id}}
+        ):
+            # Yield intermediate progress
+            node_name = list(chunk.keys())[0] if chunk else "unknown"
+            node_data = chunk.get(node_name, {}) if chunk else {}
+            
+            # Emit thinking steps for specific nodes
+            if node_name == "initial_analysis_and_routing":
+                yield {"type": "thinking", "content": "Analyzing your message and routing to appropriate memory..."}
+            elif node_name == "parallel_memory_retrieval":
+                yield {"type": "thinking", "content": "Retrieving relevant memories from multiple layers..."}
+            elif node_name == "synthesize_memories":
+                yield {"type": "thinking", "content": "Synthesizing retrieved memories..."}
+            elif node_name == "generate_and_correct_response":
+                yield {"type": "thinking", "content": "Generating response and performing self-correction..."}
+            elif node_name == "propose_new_layer":
+                yield {"type": "thinking", "content": "Creating new memory layer for this topic..."}
+            elif node_name == "create_new_layer":
+                layer_name = node_data.get("active_layer", "unknown")
+                yield {"type": "thinking", "content": f"Initializing new memory layer: {layer_name}"}
+                
+            final_state = node_data
+
+        if final_state and final_state.get("response"):
+            # Update current session history only
+            self.current_session_history.append(
+                {"role": "user", "content": user_input}
+            )
+            self.current_session_history.append(
+                {"role": "agent", "content": final_state["response"]}
+            )
+
+            # Update the instance's short_term_summary, core identity, and working memory
+            self.short_term_summary = final_state.get("short_term_summary", self.short_term_summary)
+            self.core_identity = final_state.get("core_identity", self.core_identity)
+            self.working_memory = final_state.get("working_memory", {})
+            
+            log_thinking(f"--- Session Working Memory: {self.working_memory} ---")
+
+            yield {"type": "response", "content": final_state["response"]}
+        else:
+            yield {"type": "error", "content": "Failed to generate response"}
 
     async def _start_new_session(self, session_id: str):
         """
@@ -1237,8 +1257,9 @@ Respond with ONLY a JSON object with two keys: "summary" and "uncertainties".
         # 2. Save the full conversation history to a unique archive file
         timestamp = int(asyncio.get_event_loop().time())
         archive_path = archive_dir / f"session_{self.session_id}_{timestamp}.json"
-        with open(archive_path, 'w') as f:
-            json.dump(self.current_session_history, f, indent=2)
+        await asyncio.to_thread(
+            lambda: json.dump(self.current_session_history, open(archive_path, 'w'), indent=2)
+        )
         
         log_thinking(f"--- Full session history saved to {archive_path} ---")
 

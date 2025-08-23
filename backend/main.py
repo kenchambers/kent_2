@@ -117,7 +117,7 @@ async def shutdown_event():
         await agent.aclose()
         print("Agent connection closed.")
 
-# Mount static files for frontend (if available)
+# Mount static files for the Next.js frontend
 frontend_static_path = os.path.join(os.path.dirname(__file__), "..", "frontend", ".next", "static")
 frontend_public_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "public")
 
@@ -125,387 +125,330 @@ if os.path.exists(frontend_static_path):
     app.mount("/_next/static", StaticFiles(directory=frontend_static_path), name="nextstatic")
 
 if os.path.exists(frontend_public_path):
-    app.mount("/public", StaticFiles(directory=frontend_public_path), name="public")
+    app.mount("/static", StaticFiles(directory=frontend_public_path), name="public")
+
+
+# Mount the entire Next.js static build at root (this will serve your React app)
+frontend_build_static = os.path.join(os.path.dirname(__file__), "..", "frontend", ".next", "static")
+if os.path.exists(frontend_build_static):
+    # Serve Next.js static files at /_next/static
+    app.mount("/_next", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "..", "frontend", ".next")), name="next")
 
 
 @app.get("/")
 async def root():
-    """Root endpoint - serve React terminal interface."""
-    # Create a complete React app that works with our streaming API
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Kent AI Agent Terminal</title>
-        <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-        <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-        <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <style>
-            body {{
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                font-family: 'JetBrains Mono', 'Fira Code', 'Monaco', 'Consolas', monospace;
-                margin: 0;
-                padding: 0;
-            }}
-            
-            @keyframes fadeInSlide {{
-                from {{
-                    opacity: 0;
-                    transform: translateX(20px) translateY(-10px);
-                }}
-                to {{
-                    opacity: 1;
-                    transform: translateX(0) translateY(0);
-                }}
-            }}
-            
-            @keyframes thinking-glow {{
-                0%, 100% {{ box-shadow: 0 0 5px rgba(168, 85, 247, 0.4); }}
-                50% {{ box-shadow: 0 0 15px rgba(168, 85, 247, 0.6), 0 0 25px rgba(168, 85, 247, 0.3); }}
-            }}
-            
-            .thinking-container {{
-                animation: thinking-glow 2s ease-in-out infinite;
-            }}
-            
-            /* Custom scrollbar for terminal */
-            .terminal-scrollbar {{
-                scroll-behavior: smooth;
-            }}
-            .terminal-scrollbar::-webkit-scrollbar {{
-                width: 8px;
-            }}
-            .terminal-scrollbar::-webkit-scrollbar-track {{
-                background: rgba(255, 255, 255, 0.1);
-                border-radius: 4px;
-            }}
-            .terminal-scrollbar::-webkit-scrollbar-thumb {{
-                background: rgba(168, 85, 247, 0.6);
-                border-radius: 4px;
-            }}
-            .terminal-scrollbar::-webkit-scrollbar-thumb:hover {{
-                background: rgba(168, 85, 247, 0.8);
-            }}
-        </style>
-    </head>
-    <body class="min-h-screen p-4">
-        <div id="root"></div>
-        
-        <script type="text/babel">
-            const {{ useState, useRef, useEffect }} = React;
-            
-            function TerminalApp() {{
-                const [messages, setMessages] = useState([
-                    {{ type: 'system', content: '🚀 Kent AI Agent Terminal v2.0 - Streaming enabled!' }},
-                    {{ type: 'info', content: '📚 Externalized Long-Term Memory\\n\\nInstead of keeping conversations in a growing text file that gets passed to the model, Kent stores long-term knowledge and conversation history in FAISS vector stores.\\n\\n🔍 What it is: A vector store is a database optimized for semantic search. It does not find keywords; it finds concepts and meanings.\\n\\n🧠 How it helps: The vast majority of Kent\\'s memory lives outside the context window in these vector stores. This allows the memory to grow to a virtually unlimited size without ever overwhelming the LLM.\\n\\n💡 Key Benefits:\\n• Semantic understanding over keyword matching\\n• Unlimited memory capacity\\n• Efficient context retrieval\\n• Persistent learning across sessions\\n\\nTry asking Kent about something from a previous conversation, or explore complex topics that build on each other!' }}
-                ]);
-                const [input, setInput] = useState('');
-                const [isStreaming, setIsStreaming] = useState(false);
-                const [thinkingSteps, setThinkingSteps] = useState([]);
-                const [sessionId] = useState(() => `session_${{Date.now()}}_${{Math.random().toString(36).substr(2, 9)}}`);
-                const messagesEndRef = useRef(null);
-                const inputRef = useRef(null);
-                
-                useEffect(() => {{
-                    // Scroll to bottom when new messages or thinking steps are added
-                    if (messagesEndRef.current) {{
-                        messagesEndRef.current.scrollIntoView({{ behavior: 'smooth', block: 'end' }});
-                    }}
-                }}, [messages, thinkingSteps]);
-                
-                useEffect(() => {{
-                    // Also scroll to bottom on initial load
-                    if (messagesEndRef.current) {{
-                        messagesEndRef.current.scrollIntoView({{ behavior: 'smooth' }});
-                    }}
-                }}, []);
-                
-                // Function to get icon and color for thinking step types
-                const getThinkingStepStyle = (content) => {{
-                    if (content.includes('Initial Analysis') || content.includes('Routing')) return {{ icon: '🧭', color: 'text-blue-400', bgColor: 'bg-blue-500/10', borderColor: 'border-blue-500/30', title: 'Analysis & Routing' }};
-                    if (content.includes('Emotional Context')) return {{ icon: '💭', color: 'text-purple-400', bgColor: 'bg-purple-500/10', borderColor: 'border-purple-500/30', title: 'Emotional Context' }};
-                    if (content.includes('Memory') || content.includes('Checking') || content.includes('Retrieved')) return {{ icon: '🧠', color: 'text-green-400', bgColor: 'bg-green-500/10', borderColor: 'border-green-500/30', title: 'Memory Operations' }};
-                    if (content.includes('Conscience')) return {{ icon: '⚖️', color: 'text-yellow-400', bgColor: 'bg-yellow-500/10', borderColor: 'border-yellow-500/30', title: 'Self-Correction' }};
-                    if (content.includes('Core Identity') || content.includes('Belief')) return {{ icon: '🆔', color: 'text-indigo-400', bgColor: 'bg-indigo-500/10', borderColor: 'border-indigo-500/30', title: 'Core Identity' }};
-                    if (content.includes('Generating Response')) return {{ icon: '✨', color: 'text-pink-400', bgColor: 'bg-pink-500/10', borderColor: 'border-pink-500/30', title: 'Response Generation' }};
-                    if (content.includes('Summary')) return {{ icon: '📝', color: 'text-cyan-400', bgColor: 'bg-cyan-500/10', borderColor: 'border-cyan-500/30', title: 'Summary Update' }};
-                    if (content.includes('Inner Monologue')) return {{ icon: '🤔', color: 'text-orange-400', bgColor: 'bg-orange-500/10', borderColor: 'border-orange-500/30', title: 'Internal Reasoning' }};
-                    if (content.includes('Parallel')) return {{ icon: '⚡', color: 'text-teal-400', bgColor: 'bg-teal-500/10', borderColor: 'border-teal-500/30', title: 'Parallel Processing' }};
-                    return {{ icon: '🔍', color: 'text-gray-400', bgColor: 'bg-gray-500/10', borderColor: 'border-gray-500/30', title: 'Processing' }};
-                }};
+    """Root endpoint - serve the EXACT same frontend as dev.sh"""
+    return HTMLResponse(content="""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kent AI Agent Terminal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <main class="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4">
+        <div class="container mx-auto max-w-6xl h-screen flex items-center justify-center">
+            <div class="backdrop-blur-xl bg-white/10 rounded-2xl border border-white/20 shadow-2xl overflow-hidden w-full max-h-[calc(100vh-2rem)]">
+                <div id="terminal-root"></div>
+            </div>
+        </div>
+    </main>
+    
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
 
-                // Function to format thinking content for better display
-                const formatThinkingContent = (content) => {{
-                    // Remove the header markers (--- text ---)
-                    let formatted = content.replace(/^--- (.+) ---\\s*$/gm, '');
-                    
-                    // Try to parse JSON for inner monologue and other structured content
-                    try {{
-                        if (formatted.trim().startsWith('{{') && formatted.trim().endsWith('}}')) {{
-                            const parsed = JSON.parse(formatted.trim());
-                            return JSON.stringify(parsed, null, 2);
-                        }}
-                    }} catch (e) {{
-                        // Not JSON, continue with regular formatting
-                    }}
-                    
-                    // Clean up extra whitespace
-                    formatted = formatted.trim();
-                    
-                    // If it's still mostly empty after removing headers, show the original
-                    if (formatted.length < 10) {{
-                        return content;
-                    }}
-                    
-                    return formatted;
-                }};
+        function Terminal() {
+          const [messages, setMessages] = useState([
+            { type: 'system', content: 'Kent AI Agent initialized. Type your message below.' }
+          ]);
+          const [input, setInput] = useState('');
+          const [isLoading, setIsLoading] = useState(false);
+          const [isStreaming, setIsStreaming] = useState(false);
+          const [thinkingSteps, setThinkingSteps] = useState([]);
+          const [showThinking, setShowThinking] = useState(false);
+          const [sessionId] = useState(() => `session_${ Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+          const messagesEndRef = useRef(null);
+          const inputRef = useRef(null);
+
+          const scrollToBottom = () => {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          };
+
+          useEffect(() => {
+            scrollToBottom();
+          }, [messages, thinkingSteps]);
+
+          useEffect(() => {
+            inputRef.current?.focus();
+          }, []);
+
+          const sendMessage = async (e) => {
+            e.preventDefault();
+            if (!input.trim() || isLoading || isStreaming) return;
+
+            const userMessage = input.trim();
+            setInput('');
+            setIsLoading(true);
+            setIsStreaming(true);
+            setThinkingSteps([]);
+            setShowThinking(false);
+
+            setMessages(prev => [...prev, { type: 'user', content: userMessage }]);
+
+            try {
+              const response = await fetch('/api/chat/stream', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  message: userMessage,
+                  session_id: sessionId
+                })
+              });
+
+              if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+              }
+
+              const reader = response.body?.getReader();
+              const decoder = new TextDecoder();
+
+              if (!reader) {
+                throw new Error('No response body reader available');
+              }
+
+              let buffer = '';
+              
+              while (true) {
+                const { done, value } = await reader.read();
                 
-                useEffect(() => {{
-                    inputRef.current?.focus();
-                }}, []);
+                if (done) break;
                 
-                const sendMessage = async (e) => {{
-                    e.preventDefault();
-                    if (!input.trim() || isStreaming) return;
-                    
-                    const userMessage = input.trim();
-                    setInput('');
-                    setIsStreaming(true);
-                    setThinkingSteps([]);
-                    
-                    setMessages(prev => [...prev, {{ type: 'user', content: userMessage }}]);
-                    
-                    try {{
-                        const response = await fetch('/api/chat/stream', {{
-                            method: 'POST',
-                            headers: {{ 'Content-Type': 'application/json' }},
-                            body: JSON.stringify({{ message: userMessage, session_id: sessionId }})
-                        }});
-                        
-                        if (!response.ok) throw new Error(`HTTP error! status: ${{response.status}}`);
-                        
-                        const reader = response.body?.getReader();
-                        const decoder = new TextDecoder();
-                        let buffer = '';
-                        
-                        while (true) {{
-                            const {{ done, value }} = await reader.read();
-                            if (done) break;
-                            
-                            buffer += decoder.decode(value, {{ stream: true }});
-                            const lines = buffer.split('\\n');
-                            buffer = lines.pop() || '';
-                            
-                            for (const line of lines) {{
-                                if (line.startsWith('data: ')) {{
-                                    try {{
-                                        const data = JSON.parse(line.slice(6));
-                                        if (data.type === 'thinking') {{
-                                            setThinkingSteps(prev => [...prev, {{ 
-                                                id: Date.now() + Math.random(), 
-                                                content: data.content, 
-                                                timestamp: data.timestamp,
-                                                isNew: true
-                                            }}]);
-                                        }} else if (data.type === 'response') {{
-                                            setThinkingSteps([]);
-                                            setMessages(prev => [...prev, {{ 
-                                                type: 'agent', 
-                                                content: data.content,
-                                                timestamp: data.timestamp 
-                                            }}]);
-                                        }} else if (data.type === 'complete') {{
-                                            setIsStreaming(false);
-                                        }} else if (data.type === 'error') {{
-                                            setThinkingSteps([]);
-                                            setMessages(prev => [...prev, {{ type: 'error', content: data.content }}]);
-                                            setIsStreaming(false);
-                                        }}
-                                    }} catch (e) {{ console.error('Parse error:', e); }}
-                                }}
-                            }}
-                        }}
-                    }} catch (error) {{
-                        console.error('Error:', error);
-                        setThinkingSteps([]);
-                        setMessages(prev => [...prev, {{ type: 'error', content: `Error: ${{error.message}}` }}]);
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\\n');
+                
+                buffer = lines.pop() || '';
+                
+                for (const line of lines) {
+                  if (line.startsWith('data: ')) {
+                    try {
+                      const data = JSON.parse(line.slice(6));
+                      
+                      if (data.type === 'thinking') {
+                        setThinkingSteps(prev => [...prev, {
+                          id: Date.now() + Math.random(),
+                          content: data.content,
+                          timestamp: data.timestamp || new Date().toISOString(),
+                          isNew: true
+                        }]);
+                        setShowThinking(true);
+                      } else if (data.type === 'response') {
+                        setThinkingSteps(prev => prev.map(step => ({...step, isNew: false, fading: true})));
+                        setTimeout(() => {
+                          setThinkingSteps([]);
+                          setShowThinking(false);
+                          setMessages(prev => [...prev, { 
+                            type: 'agent', 
+                            content: data.content,
+                            timestamp: data.timestamp 
+                          }]);
+                        }, 1500);
+                      } else if (data.type === 'complete') {
                         setIsStreaming(false);
-                    }}
-                }};
-                
-                return (
-                    <div className="container mx-auto max-w-6xl">
-                        <div className="text-center mb-8 pt-8">
-                            <h1 className="text-4xl md:text-6xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-4">
-                                Kent AI Agent
-                            </h1>
-                            <p className="text-gray-300 text-lg">Interactive streaming terminal</p>
+                        setIsLoading(false);
+                      } else if (data.type === 'error') {
+                        setThinkingSteps([]);
+                        setShowThinking(false);
+                        setMessages(prev => [...prev, { 
+                          type: 'error', 
+                          content: data.content
+                        }]);
+                        setIsStreaming(false);
+                        setIsLoading(false);
+                      }
+                    } catch (parseError) {
+                      console.error('Error parsing SSE data:', parseError);
+                    }
+                  }
+                }
+              }
+              
+            } catch (error) {
+              console.error('Error sending message:', error);
+              setThinkingSteps([]);
+              setShowThinking(false);
+              setMessages(prev => [...prev, { 
+                type: 'error', 
+                content: `Error: ${error.message}. Make sure the backend server is running.`
+              }]);
+            } finally {
+              setIsLoading(false);
+              setIsStreaming(false);
+              setThinkingSteps([]);
+              setShowThinking(false);
+            }
+          };
+
+          const formatMessage = (message) => {
+            return message.split('\\n').map((line, index) => {
+              let className = "";
+              let content = line;
+              
+              if (line.includes('thinking') || line.includes('analyzing')) {
+                className = "text-yellow-400 italic";
+              } else if (line.includes('searching') || line.includes('loading')) {
+                className = "text-cyan-400";
+              } else if (line.includes('error') || line.includes('Error')) {
+                className = "text-red-400";
+              } else if (line.includes('memory') || line.includes('episodic')) {
+                className = "text-green-400";
+              } else {
+                className = "text-gray-200";
+              }
+              
+              return (
+                <div key={index} className={className}>
+                  {content || <br />}
+                </div>
+              );
+            });
+          };
+
+          return (
+            <div className="h-[calc(100vh-4rem)] max-h-[800px] flex flex-col">
+              <div className="bg-gray-800/50 border-b border-white/10 p-4 flex items-center space-x-2">
+                <div className="flex space-x-2">
+                  <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                  <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                </div>
+                <div className="text-gray-300 text-sm ml-4">Kent AI Terminal</div>
+                <div className="ml-auto text-xs text-gray-400">{sessionId.slice(0, 12)}...</div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-sm">
+                {messages.map((message, index) => (
+                  <div key={index} className="group">
+                    {message.type === 'system' && (
+                      <div className="text-green-400 opacity-80">
+                        <span className="text-gray-500">system:</span> {message.content}
+                      </div>
+                    )}
+                    
+                    {message.type === 'user' && (
+                      <div className="text-blue-300">
+                        <span className="text-gray-400">you@kent:</span>
+                        <span className="text-purple-300">~</span>
+                        <span className="text-gray-300">$</span> {message.content}
+                      </div>
+                    )}
+                    
+                    {message.type === 'agent' && (
+                      <div className="text-gray-200 pl-4 border-l-2 border-purple-500/30">
+                        <div className="text-xs text-gray-500 mb-1">
+                          {message.timestamp && new Date(message.timestamp).toLocaleTimeString()}
                         </div>
-                        
-                        <div className="backdrop-blur-xl bg-white/10 rounded-2xl border border-white/20 shadow-2xl overflow-hidden">
-                            <div className="bg-gray-800/50 border-b border-white/10 p-4 flex items-center space-x-2">
-                                <div className="flex space-x-2">
-                                    <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                                    <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                                </div>
-                                <div className="text-gray-300 text-sm ml-4">Kent AI Terminal</div>
-                                <div className="ml-auto text-xs text-gray-400">{{sessionId.slice(0, 12)}}...</div>
-                            </div>
-                            
-                            <div className="h-[500px] overflow-y-auto p-4 space-y-4 font-mono text-sm terminal-scrollbar">
-                                {{messages.map((message, index) => (
-                                    <div key={{index}} className="group">
-                                        {{message.type === 'system' && (
-                                            <div className="text-green-400 opacity-80">
-                                                <span className="text-gray-500">system:</span> {{message.content}}
-                                            </div>
-                                        )}}
-                                        
-                                        {{message.type === 'info' && (
-                                            <div className="text-cyan-300 pl-4 border-l-4 border-cyan-500/50 bg-cyan-500/10 rounded-r-lg py-3 pr-3 mb-2">
-                                                <div className="text-xs text-cyan-400 mb-2 font-semibold uppercase tracking-wider">
-                                                    📚 System Information
-                                                </div>
-                                                <div className="whitespace-pre-wrap text-sm leading-relaxed">{{message.content}}</div>
-                                            </div>
-                                        )}}
-                                        
-                                        {{message.type === 'user' && (
-                                            <div className="text-blue-300">
-                                                <span className="text-gray-400">you@kent:</span>
-                                                <span className="text-purple-300">~</span>
-                                                <span className="text-gray-300">$ </span>{{message.content}}
-                                            </div>
-                                        )}}
-                                        
-                                        {{message.type === 'agent' && (
-                                            <div className="text-gray-200 pl-4 border-l-2 border-purple-500/30">
-                                                <div className="text-xs text-gray-500 mb-1">
-                                                    {{message.timestamp && new Date(message.timestamp).toLocaleTimeString()}}
-                                                </div>
-                                                <div className="whitespace-pre-wrap">{{message.content}}</div>
-                                            </div>
-                                        )}}
-                                        
-                                        {{message.type === 'error' && (
-                                            <div className="text-red-400 pl-4 border-l-2 border-red-500/50">
-                                                {{message.content}}
-                                            </div>
-                                        )}}
-                                    </div>
-                                ))}}
-                                
-                                {{isStreaming && thinkingSteps.length > 0 && (
-                                    <div className="space-y-2 mb-4 thinking-container rounded-lg p-3 border border-purple-500/20">
-                                        <div className="text-xs text-gray-500 font-semibold uppercase tracking-wider flex items-center space-x-2">
-                                            <div className="animate-spin w-3 h-3 border border-purple-500 border-t-transparent rounded-full"></div>
-                                            <span>Kent's Cognitive Process</span>
-                                        </div>
-                                        {{thinkingSteps.map((step, index) => {{
-                                            const style = getThinkingStepStyle(step.content);
-                                            return (
-                                                <div 
-                                                    key={{step.id}} 
-                                                    className={{`
-                                                        ${{style.bgColor}} ${{style.borderColor}} ${{style.color}}
-                                                        border-l-4 pl-4 pr-3 py-2 rounded-r-lg backdrop-blur-sm
-                                                        transform transition-all duration-500 ease-out
-                                                        ${{step.isNew ? 'animate-pulse' : ''}}
-                                                        opacity-0 translate-x-4
-                                                    `}}
-                                                    style={{{{
-                                                        animation: `fadeInSlide 0.6s ease-out ${{index * 0.1}}s forwards`
-                                                    }}}}
-                                                >
-                                                    <div className="flex items-start space-x-2">
-                                                        <span className="text-base flex-shrink-0 mt-0.5">{{style.icon}}</span>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="font-semibold text-sm mb-2 opacity-90">
-                                                                {{style.title}}
-                                                            </div>
-                                                            <div className="font-mono text-xs leading-relaxed break-words">
-                                                                {{(() => {{
-                                                                    const formattedContent = formatThinkingContent(step.content);
-                                                                    const isLongContent = formattedContent.length > 200;
-                                                                    
-                                                                    return isLongContent ? (
-                                                                        <details className="group">
-                                                                            <summary className="cursor-pointer hover:text-white transition-colors list-none flex items-center space-x-2">
-                                                                                <span>{{formattedContent.substring(0, 200).replace(/\\n/g, ' ')}}...</span>
-                                                                                <span className="ml-2 text-xs opacity-60 group-open:hidden bg-current/20 px-2 py-1 rounded">[expand]</span>
-                                                                            </summary>
-                                                                            <div className="mt-3 pl-3 border-l-2 border-current/20 bg-black/20 rounded p-3">
-                                                                                <pre className="whitespace-pre-wrap text-xs">{{formattedContent}}</pre>
-                                                                            </div>
-                                                                        </details>
-                                                                    ) : (
-                                                                        <pre className="whitespace-pre-wrap">{{formattedContent}}</pre>
-                                                                    );
-                                                                }})()}}
-                                                            </div>
-                                                            {{step.timestamp && (
-                                                                <div className="text-xs opacity-50 mt-2 flex items-center space-x-1">
-                                                                    <span>⏱</span>
-                                                                    <span>{{new Date(step.timestamp).toLocaleTimeString()}}</span>
-                                                                </div>
-                                                            )}}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        }})}}
-                                    </div>
-                                )}}
-                                
-                                <div ref={{messagesEndRef}} />
-                            </div>
-                            
-                            <div className="border-t border-white/10 p-4">
-                                <form onSubmit={{sendMessage}} className="flex items-center space-x-2">
-                                    <div className="text-blue-300 text-sm font-mono">
-                                        <span className="text-gray-400">you@kent:</span>
-                                        <span className="text-purple-300">~</span>
-                                        <span className="text-gray-300">$ </span>
-                                    </div>
-                                    <input
-                                        ref={{inputRef}}
-                                        type="text"
-                                        value={{input}}
-                                        onChange={{(e) => setInput(e.target.value)}}
-                                        placeholder={{isStreaming ? "Kent is processing..." : "Type your message..."}}
-                                        disabled={{isStreaming}}
-                                        className="flex-1 bg-transparent border-none outline-none text-gray-200 font-mono text-sm placeholder-gray-500 disabled:opacity-50"
-                                    />
-                                    <button
-                                        type="submit"
-                                        disabled={{!input.trim() || isStreaming}}
-                                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg text-sm transition-colors"
-                                    >
-                                        {{isStreaming ? 'Processing...' : 'Send'}}
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-                        
-                        <div className="text-center mt-4">
-                            <p className="text-gray-400 text-xs">
-                                Powered by LangGraph + Google Gemini 2.5 Pro • Streaming enabled • Session: {{sessionId.slice(0, 8)}}
-                            </p>
-                        </div>
+                        <div className="whitespace-pre-wrap">{formatMessage(message.content)}</div>
+                      </div>
+                    )}
+                    
+                    {message.type === 'error' && (
+                      <div className="text-red-400 pl-4 border-l-2 border-red-500/50">
+                        {message.content}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {(isStreaming || showThinking) && thinkingSteps.length > 0 && (
+                  <div className="space-y-2 mb-4">
+                    <div className="text-xs text-gray-500 font-semibold uppercase tracking-wider flex items-center space-x-2">
+                      <div className="animate-spin w-3 h-3 border border-purple-500 border-t-transparent rounded-full"></div>
+                      <span>Thinking Process</span>
                     </div>
-                );
-            }}
-            
-            ReactDOM.render(<TerminalApp />, document.getElementById('root'));
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+                    {thinkingSteps.map((step, index) => (
+                      <div 
+                        key={step.id} 
+                        className={`
+                          text-gray-400 pl-4 border-l-2 border-purple-500/30 bg-purple-500/5 rounded-r-lg p-2
+                          transition-all duration-1000 ease-out
+                          ${step.fading ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}
+                          ${step.isNew ? 'animate-pulse' : ''}
+                        `}
+                        style={{
+                          animationDelay: `${index * 0.1}s`,
+                          transform: step.fading ? 'translateX(-10px)' : 'translateX(0)'
+                        }}
+                      >
+                        <div className="flex items-start space-x-2">
+                          <div className="animate-spin w-3 h-3 border border-purple-500 border-t-transparent rounded-full flex-shrink-0 mt-0.5"></div>
+                          <div className="font-mono text-xs leading-relaxed break-words flex-1">
+                            {step.content}
+                          </div>
+                        </div>
+                        {step.timestamp && (
+                          <div className="text-xs opacity-50 mt-1 ml-5">
+                            {new Date(step.timestamp).toLocaleTimeString()}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {isLoading && thinkingSteps.length === 0 && (
+                  <div className="text-gray-400 pl-4 border-l-2 border-purple-500/30">
+                    <div className="flex items-center space-x-2">
+                      <div className="animate-spin w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full"></div>
+                      <span>Connecting to Kent...</span>
+                    </div>
+                  </div>
+                )}
+
+                <div ref={messagesEndRef} />
+              </div>
+
+              <div className="border-t border-white/10 p-4">
+                <form onSubmit={sendMessage} className="flex items-center space-x-2">
+                  <div className="text-blue-300 text-sm font-mono">
+                    <span className="text-gray-400">you@kent:</span>
+                    <span className="text-purple-300">~</span>
+                    <span className="text-gray-300">$</span>
+                  </div>
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={isStreaming ? "Kent is processing..." : "Type your message..."}
+                    disabled={isLoading || isStreaming}
+                    className="flex-1 bg-transparent border-none outline-none text-gray-200 font-mono text-sm placeholder-gray-500 disabled:opacity-50"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!input.trim() || isLoading || isStreaming}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg text-sm transition-colors"
+                  >
+                    {isStreaming ? 'Processing...' : 'Send'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          );
+        }
+
+        ReactDOM.render(<Terminal />, document.getElementById('terminal-root'));
+    </script>
+</body>
+</html>
+    """)
 
 
 @app.get("/health")
@@ -516,14 +459,14 @@ async def health_check():
 
 @app.post("/api/chat/stream")
 async def chat_stream(message: ChatMessage):
-    """Streaming chat endpoint with real thinking process."""
+    """Streaming chat endpoint with both native streaming and detailed thinking logs."""
     thinking_queue = asyncio.Queue()
     
     # Get the current event loop at the start of the request
     current_loop = asyncio.get_running_loop()
     
     def thinking_callback(thinking_message: str):
-        """Callback to capture thinking logs from agent."""
+        """Callback to capture detailed thinking logs from agent."""
         try:
             # Use the captured loop reference to safely add to queue from any thread
             current_loop.call_soon_threadsafe(thinking_queue.put_nowait, thinking_message)
@@ -534,34 +477,57 @@ async def chat_stream(message: ChatMessage):
         try:
             agent_instance = await get_agent()
             
-            # Set up the thinking callback to capture agent logs
+            # Set up the thinking callback to capture detailed agent logs
             set_thinking_callback(thinking_callback)
             
-            # Start agent processing in a separate task
-            agent_task = asyncio.create_task(agent_instance.arun(message.message, session_id=message.session_id))
+            # Start agent processing using native streaming
+            agent_stream = agent_instance.astream(message.message, session_id=message.session_id)
+            agent_task = asyncio.create_task(anext(agent_stream))
             
-            # Stream thinking messages as they come in
-            response = None
+            response_content = None
+            
+            # Stream both detailed thinking and high-level progress
             while True:
-                try:
-                    # Check if we have thinking messages to send
-                    try:
-                        thinking_msg = thinking_queue.get_nowait()
-                        yield f"data: {json.dumps({'type': 'thinking', 'content': thinking_msg, 'timestamp': datetime.now().isoformat()})}\n\n"
-                    except asyncio.QueueEmpty:
-                        pass
-                    
-                    # Check if agent task is complete
-                    if agent_task.done():
-                        response = await agent_task
-                        break
-                    
-                    # Small delay to avoid busy waiting
-                    await asyncio.sleep(0.1)
+                done_tasks = []
                 
-                except Exception as e:
-                    print(f"Error in streaming loop: {e}")
-                    break
+                # Check for detailed thinking messages
+                try:
+                    thinking_msg = thinking_queue.get_nowait()
+                    yield f"data: {json.dumps({'type': 'thinking', 'content': thinking_msg, 'timestamp': datetime.now().isoformat()})}\n\n"
+                except asyncio.QueueEmpty:
+                    pass
+                
+                # Check for high-level progress from native streaming
+                if agent_task.done():
+                    try:
+                        chunk = await agent_task
+                        
+                        if chunk["type"] == "response":
+                            response_content = chunk["content"]
+                            
+                        # Send the high-level progress
+                        chunk_data = {
+                            "type": chunk["type"],
+                            "content": chunk["content"],
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        yield f"data: {json.dumps(chunk_data)}\n\n"
+                        
+                        if chunk["type"] == "response":
+                            break
+                        
+                        # Get next chunk
+                        agent_task = asyncio.create_task(anext(agent_stream))
+                        
+                    except StopAsyncIteration:
+                        # Agent streaming is complete
+                        break
+                    except Exception as e:
+                        print(f"Error in agent streaming: {e}")
+                        break
+                
+                # Small delay to avoid busy waiting
+                await asyncio.sleep(0.05)
             
             # Clear the callback
             set_thinking_callback(None)
@@ -574,17 +540,12 @@ async def chat_stream(message: ChatMessage):
                 except asyncio.QueueEmpty:
                     break
             
-            if response:
-                # Send final response
-                yield f"data: {json.dumps({'type': 'response', 'content': response, 'timestamp': datetime.now().isoformat()})}\n\n"
-                
-                # Save conversation
-                save_conversation(message.session_id, message.message, response)
-                
-                # Send completion signal
-                yield f"data: {json.dumps({'type': 'complete', 'session_id': message.session_id})}\n\n"
-            else:
-                yield f"data: {json.dumps({'type': 'error', 'content': 'No response from agent', 'timestamp': datetime.now().isoformat()})}\n\n"
+            # Save conversation if we got a response
+            if response_content:
+                save_conversation(message.session_id, message.message, response_content)
+            
+            # Send completion signal
+            yield f"data: {json.dumps({'type': 'complete', 'session_id': message.session_id, 'timestamp': datetime.now().isoformat()})}\n\n"
             
         except Exception as e:
             # Clear the callback on error

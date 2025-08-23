@@ -6,6 +6,10 @@ primary_region = "iad"
   app = "uvicorn backend.main:app --host 0.0.0.0 --port 8000"
   cron = "supercronic /app/crontab"
 
+# Process-specific configurations
+[processes_config.cron]
+  restart_policy = "always"
+
 [build]
 
 [env]
@@ -18,7 +22,7 @@ primary_region = "iad"
   force_https = true
   auto_stop_machines = true
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ["app"]
 
 [[http_service.checks]]

@@ -13,7 +13,6 @@ from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 import sys
 import os
-
 # Add the src directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -43,7 +42,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize the agent
+# Single agent instance - it handles session isolation internally
 agent = None
 db_path = os.getenv("DATABASE_PATH", "conversations.db")
 
@@ -54,7 +53,6 @@ async def get_agent():
     if agent is None:
         agent = SelfImprovingAgent()
     return agent
-
 
 def init_db():
     """Initialize SQLite database for conversation storage."""
@@ -116,6 +114,7 @@ async def shutdown_event():
     if agent:
         await agent.aclose()
         print("Agent connection closed.")
+
 
 # Mount static files for the Next.js frontend
 frontend_static_path = os.path.join(os.path.dirname(__file__), "..", "frontend", ".next", "static")

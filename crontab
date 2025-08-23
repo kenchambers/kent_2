@@ -1,0 +1,2 @@
+# Run consolidate experiences daily at 2 AM UTC
+0 2 * * * python -m self_improving_agent.consolidate_experiences

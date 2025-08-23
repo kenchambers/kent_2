@@ -70,14 +70,14 @@ class SelfImprovingAgent:
         self.conn = None
         self.graph = None  # Will be built when checkpointer is ready
         
-        # Session management
-        self.current_session_history: List[Dict[str, str]] = []  # Only current session
-        self.session_id = None
-        self.session_start_time = None
+        # Session management - now keyed by session_id for proper isolation
+        self.session_histories: Dict[str, List[Dict[str, str]]] = {}
+        self.session_start_times: Dict[str, float] = {}
+        self.current_session_id = None  # Track the currently active session
         
-        # Memory management
-        self.short_term_summary = ""
-        self.working_memory: Dict[str, Any] = {}  # Persistent facts for current session
+        # Memory management - now keyed by session_id
+        self.session_short_summaries: Dict[str, str] = {}
+        self.session_working_memories: Dict[str, Dict[str, Any]] = {}
         self.conversation_window_size = 10  # Only keep last N exchanges in context
         
         # Vector stores
@@ -1144,12 +1144,12 @@ Example for a response needing revision:
         await self._ensure_initialized()
         
         # Initialize session if needed
-        if self.session_id != session_id:
+        if self.current_session_id != session_id:
             await self._start_new_session(session_id)
         
         # Triage for simple greetings to provide a quick response
         greeting_match = self.simple_greetings.match(user_input)
-        if greeting_match and len(self.current_session_history) < 4:  # Allow greetings in early conversation
+        if greeting_match and len(self.session_histories.get(session_id, [])) < 4:  # Allow greetings in early conversation
             # Check if the greeting includes the agent's name
             if greeting_match.group(2) and self.core_identity.get('name'):
                 agent_name = self.core_identity.get('name', 'there')
@@ -1158,19 +1158,22 @@ Example for a response needing revision:
                 else:
                     response = "Hey there! How can I help you today?"
             
-            self.current_session_history.append({"role": "user", "content": user_input})
-            self.current_session_history.append({"role": "agent", "content": response})
+            if session_id not in self.session_histories:
+                self.session_histories[session_id] = []
+            self.session_histories[session_id].append({"role": "user", "content": user_input})
+            self.session_histories[session_id].append({"role": "agent", "content": response})
             return response
         
         # Keep the conversation history within the window size
-        history_window = self.current_session_history[
+        current_history = self.session_histories.get(session_id, [])
+        history_window = current_history[
             -self.conversation_window_size*2:
-        ] if self.conversation_window_size > 0 else self.current_session_history
+        ] if self.conversation_window_size > 0 else current_history
 
         initial_state = {
             "user_input": user_input,
             "conversation_history": history_window,  # Pass the windowed history
-            "short_term_summary": self.short_term_summary,
+            "short_term_summary": self.session_short_summaries.get(session_id, ""),
 
             "semantic_cache": {},
             "layer_info": {},
@@ -1183,7 +1186,7 @@ Example for a response needing revision:
             "past_experiences": None,
             "core_identity": self.core_identity,
             "emotional_context": None,
-            "working_memory": self.working_memory.copy(),  # Pass current working memory
+            "working_memory": self.session_working_memories.get(session_id, {}).copy(),  # Pass session working memory
             "retrieved_docs": [],
             "drill_down_needed": False,
             "archive_to_load": None,
@@ -1197,20 +1200,22 @@ Example for a response needing revision:
             config={"configurable": {"thread_id": session_id}}
         )
 
-        # Update current session history only
-        self.current_session_history.append(
+        # Update session-specific history and state
+        if session_id not in self.session_histories:
+            self.session_histories[session_id] = []
+        self.session_histories[session_id].append(
             {"role": "user", "content": user_input}
         )
-        self.current_session_history.append(
+        self.session_histories[session_id].append(
             {"role": "agent", "content": final_state["response"]}
         )
 
-        # Update the instance's short_term_summary, core identity, and working memory
-        self.short_term_summary = final_state["short_term_summary"]
+        # Update the session-specific state
+        self.session_short_summaries[session_id] = final_state["short_term_summary"]
         self.core_identity = final_state["core_identity"]
-        self.working_memory = final_state.get("working_memory", {})
+        self.session_working_memories[session_id] = final_state.get("working_memory", {})
         
-        log_thinking(f"--- Session Working Memory: {self.working_memory} ---")
+        log_thinking(f"--- Session {session_id} Working Memory: {self.session_working_memories[session_id]} ---")
 
         return final_state["response"]
 
@@ -1221,12 +1226,12 @@ Example for a response needing revision:
         await self._ensure_initialized()
         
         # Initialize session if needed
-        if self.session_id != session_id:
+        if self.current_session_id != session_id:
             await self._start_new_session(session_id)
         
         # Triage for simple greetings to provide a quick response
         greeting_match = self.simple_greetings.match(user_input)
-        if greeting_match and len(self.current_session_history) < 4:  # Allow greetings in early conversation
+        if greeting_match and len(self.session_histories.get(session_id, [])) < 4:  # Allow greetings in early conversation
             # Check if the greeting includes the agent's name
             if greeting_match.group(2) and self.core_identity.get('name'):
                 agent_name = self.core_identity.get('name', 'there')
@@ -1237,20 +1242,23 @@ Example for a response needing revision:
             else:
                 response = "Hey there! How can I help you today?"
             
-            self.current_session_history.append({"role": "user", "content": user_input})
-            self.current_session_history.append({"role": "agent", "content": response})
+            if session_id not in self.session_histories:
+                self.session_histories[session_id] = []
+            self.session_histories[session_id].append({"role": "user", "content": user_input})
+            self.session_histories[session_id].append({"role": "agent", "content": response})
             yield {"type": "response", "content": response}
             return
 
         # Keep the conversation history within the window size
-        history_window = self.current_session_history[
+        current_history = self.session_histories.get(session_id, [])
+        history_window = current_history[
             -self.conversation_window_size*2:
-        ] if self.conversation_window_size > 0 else self.current_session_history
+        ] if self.conversation_window_size > 0 else current_history
 
         initial_state = {
             "user_input": user_input,
             "conversation_history": history_window, # Pass the windowed history
-            "short_term_summary": self.short_term_summary,
+            "short_term_summary": self.session_short_summaries.get(session_id, ""),
 
             "semantic_cache": {},
             "layer_info": {},
@@ -1263,7 +1271,7 @@ Example for a response needing revision:
             "past_experiences": None,
             "core_identity": self.core_identity,
             "emotional_context": None,
-            "working_memory": self.working_memory.copy(),  # Pass current working memory
+            "working_memory": self.session_working_memories.get(session_id, {}).copy(),  # Pass session working memory
             "retrieved_docs": [],
             "drill_down_needed": False,
             "archive_to_load": None,
@@ -1301,20 +1309,22 @@ Example for a response needing revision:
             final_state = node_data
 
         if final_state and final_state.get("response"):
-            # Update current session history only
-            self.current_session_history.append(
+            # Update session-specific history
+            if session_id not in self.session_histories:
+                self.session_histories[session_id] = []
+            self.session_histories[session_id].append(
                 {"role": "user", "content": user_input}
             )
-            self.current_session_history.append(
+            self.session_histories[session_id].append(
                 {"role": "agent", "content": final_state["response"]}
             )
 
-            # Update the instance's short_term_summary, core identity, and working memory
-            self.short_term_summary = final_state.get("short_term_summary", self.short_term_summary)
+            # Update the session-specific state
+            self.session_short_summaries[session_id] = final_state.get("short_term_summary", self.session_short_summaries.get(session_id, ""))
             self.core_identity = final_state.get("core_identity", self.core_identity)
-            self.working_memory = final_state.get("working_memory", {})
+            self.session_working_memories[session_id] = final_state.get("working_memory", {})
             
-            log_thinking(f"--- Session Working Memory: {self.working_memory} ---")
+            log_thinking(f"--- Session {session_id} Working Memory: {self.session_working_memories[session_id]} ---")
 
             yield {"type": "response", "content": final_state["response"]}
         else:
@@ -1324,25 +1334,37 @@ Example for a response needing revision:
         """
         Starts a new conversation session, summarizing the previous one if it exists.
         """
-        # Summarize and save previous session if it had content
-        if self.current_session_history and len(self.current_session_history) > 2:
-            await self._summarize_and_save_session()
+        # Summarize and save previous session if it had content and exists
+        if self.current_session_id and self.current_session_id in self.session_histories:
+            current_history = self.session_histories[self.current_session_id]
+            if current_history and len(current_history) > 2:
+                await self._summarize_and_save_session(self.current_session_id)
         
-        # Reset for new session
-        self.session_id = session_id
-        self.session_start_time = asyncio.get_event_loop().time()
-        self.current_session_history = []
-        self.working_memory = {}
-        self.short_term_summary = ""
+        # Initialize new session if it doesn't exist
+        self.current_session_id = session_id
+        self.session_start_times[session_id] = asyncio.get_event_loop().time()
+        
+        if session_id not in self.session_histories:
+            self.session_histories[session_id] = []
+        if session_id not in self.session_working_memories:
+            self.session_working_memories[session_id] = {}
+        if session_id not in self.session_short_summaries:
+            self.session_short_summaries[session_id] = ""
         
         log_thinking(f"--- Started New Session: {session_id} ---")
     
-    async def _summarize_and_save_session(self):
+    async def _summarize_and_save_session(self, session_id: str = None):
         """
-        Creates a comprehensive summary of the current session, saves the full
+        Creates a comprehensive summary of the specified session, saves the full
         history to an archive, and links the two in the session summary vector store.
         """
-        if not self.current_session_history:
+        # Use current session if no session_id provided (for backward compatibility)
+        target_session_id = session_id or self.current_session_id
+        if not target_session_id or target_session_id not in self.session_histories:
+            return
+            
+        session_history = self.session_histories[target_session_id]
+        if not session_history:
             return
             
         # 1. Create a dedicated directory for archives if it doesn't exist
@@ -1351,17 +1373,20 @@ Example for a response needing revision:
         
         # 2. Save the full conversation history to a unique archive file
         timestamp = int(asyncio.get_event_loop().time())
-        archive_path = archive_dir / f"session_{self.session_id}_{timestamp}.json"
+        archive_path = archive_dir / f"session_{target_session_id}_{timestamp}.json"
         await asyncio.to_thread(
-            lambda: json.dump(self.current_session_history, open(archive_path, 'w'), indent=2)
+            lambda: json.dump(session_history, open(archive_path, 'w'), indent=2)
         )
         
         log_thinking(f"--- Full session history saved to {archive_path} ---")
 
         # 3. Create conversation text for summarization
         conversation_text = ""
-        for msg in self.current_session_history:
+        for msg in session_history:
             conversation_text += f"{msg['role'].upper()}: {msg['content']}\n"
+        
+        # Get session-specific working memory
+        session_working_memory = self.session_working_memories.get(target_session_id, {})
         
         # Generate comprehensive summary
         summary_prompt = f"""
@@ -1370,7 +1395,7 @@ Example for a response needing revision:
         Conversation:
         {conversation_text}
         
-        Working Memory Facts: {json.dumps(self.working_memory)}
+        Working Memory Facts: {json.dumps(session_working_memory)}
         
         Create a detailed summary that includes:
         1. WHO was involved (names, roles)
@@ -1386,9 +1411,10 @@ Example for a response needing revision:
         session_summary = response.content.strip()
         
         # 5. Save summary to vector store with metadata linking to the archive
+        session_start_time = self.session_start_times.get(target_session_id, timestamp)
         summary_metadata = {
-            "session_id": self.session_id,
-            "start_time": self.session_start_time,
+            "session_id": target_session_id,
+            "start_time": session_start_time,
             "end_time": timestamp,
             "archive_path": str(archive_path),
             "creation_timestamp": datetime.now().isoformat()
@@ -1404,10 +1430,11 @@ Example for a response needing revision:
         log_thinking(f"--- Session Summary saved with link to archive: {archive_path} ---")
 
     async def aclose(self):
-        """Closes the database connection and saves current session."""
-        # Summarize current session before closing
-        if self.current_session_history:
-            await self._summarize_and_save_session()
+        """Closes the database connection and saves all active sessions."""
+        # Summarize all active sessions before closing
+        for session_id, history in self.session_histories.items():
+            if history and len(history) > 2:
+                await self._summarize_and_save_session(session_id)
             
         if self.conn:
             await self.conn.close()

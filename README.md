@@ -252,7 +252,7 @@ To evolve from a purely personal assistant into a wiser, more insightful entity,
 
 The core principle of this feature is that **personal conversations are always private**. The agent's wisdom is not derived from raw chat logs, but from high-level, anonymized lessons.
 
-1.  **Offline Processing**: A new script, `consolidate-experiences`, runs periodically (e.g., as a daily cron job). This script is the _only_ part of the system that reviews conversation archives.
+1.  **Offline Processing**: A new script, `consolidate-experiences`, runs automatically as a daily cron job at 2 AM UTC on Fly.io using Supercronic. This script is the _only_ part of the system that reviews conversation archives.
 2.  **AI-Powered Anonymization**: For each conversation, the script uses the LLM to identify if a meaningful, general-purpose lesson was learned. It is explicitly instructed to discard any personally identifiable information.
 3.  **Distillation of Wisdom**: If a safe, shareable lesson is found, the script extracts two things: the user's **first name only** (or "a friend" if no name is available) and a concise summary of the lesson (e.g., "Courage is not the absence of fear, but acting in spite of it.").
 4.  **Secure Storage**: This anonymized lesson is then stored in a dedicated `shared_experiences` vector store, completely separate from any conversation data.
@@ -616,7 +616,19 @@ uv run clear-memory
 
 ### Consolidating Collective Wisdom
 
-To process recent conversations and distill them into the "Shared Experiences" memory layer, you can run the consolidation script. This is the script that would be set up as a cron job in a production environment.
+The consolidation script automatically runs daily at 2 AM UTC in production on Fly.io via a Supercronic-based cron job. This processes recent conversations and distills them into the "Shared Experiences" memory layer.
+
+#### 🤖 Automated Production Schedule
+
+In production (Fly.io deployment), the consolidation runs automatically:
+- **Schedule**: Daily at 2 AM UTC
+- **Implementation**: Supercronic cron job in dedicated process
+- **Command**: `python -m self_improving_agent.consolidate_experiences`
+- **Logs**: Viewable via `flyctl logs -i <cron_machine_id>`
+
+#### 🛠️ Manual Development Testing
+
+For local development or manual testing, you can run the consolidation script directly:
 
 ```bash
 uv run consolidate-experiences
@@ -693,6 +705,36 @@ This is the key to the agent's ability to learn and improve.
 
 In essence, you are interacting with a stateful agent that doesn't just respond to your queries but actively organizes its knowledge and refines its responses based on a structured, self-critical process. The use of LangGraph allows for this complex, cyclical reasoning, which is a significant step beyond simple prompt-response interactions.
 ```
+
+## 🏭 Production Infrastructure
+
+The agent is deployed on Fly.io with a multi-process architecture that supports both real-time interactions and automated background processing.
+
+### 🔄 Process Architecture
+
+**App Process (`app`)**: 
+- Runs the FastAPI web server with uvicorn
+- Handles real-time chat interactions via WebSocket streaming
+- Serves the Next.js frontend interface
+- Auto-scales based on demand
+
+**Cron Process (`cron`)**:
+- Dedicated process for scheduled tasks using Supercronic
+- Runs the `consolidate-experiences` script daily at 2 AM UTC
+- Processes conversation archives and extracts shared wisdom
+- Operates independently from web traffic
+
+### 🕐 Automated Wisdom Consolidation
+
+The production environment automatically processes conversation data to build collective wisdom:
+
+- **Daily Schedule**: 2 AM UTC via Supercronic cron scheduler
+- **Privacy Protection**: AI-powered anonymization removes all PII
+- **Wisdom Extraction**: Identifies meaningful lessons from conversations  
+- **Vector Storage**: Stores anonymized insights in dedicated FAISS index
+- **Monitoring**: Cron logs available via `flyctl logs -i <cron_machine_id>`
+
+This infrastructure ensures the agent continuously evolves its wisdom while maintaining strict privacy boundaries, all without manual intervention.
 
 ## 🔬 Related Scholarly Research Papers
 

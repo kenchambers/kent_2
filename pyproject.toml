@@ -30,6 +30,7 @@ dependencies = [
 kent = "self_improving_agent.main:main"
 migrate-memory = "self_improving_agent.migrate_memory:main"
 clear-memory = "self_improving_agent.clear_memory:main"
+consolidate-experiences = "self_improving_agent.consolidate_experiences:main"
 
 [tool.uv]
 dev-dependencies = [

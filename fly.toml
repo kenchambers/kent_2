@@ -2,6 +2,13 @@
 app = "kent-ai-agent"
 primary_region = "iad"
 
+[processes]
+  app = "uvicorn backend.main:app --host 0.0.0.0 --port 8000"
+  cron = "uv run consolidate-experiences"
+
+[schedules]
+  daily_consolidation = { schedule = "daily", process = "cron" }
+
 [build]
 
 [env]

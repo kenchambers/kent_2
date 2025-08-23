@@ -67,21 +67,21 @@ Here's how the self-improving agent's layers work together:
               │           🧠 PARALLEL MEMORY RETRIEVAL
               │            (asyncio.gather concurrent execution)
               │
-              │ ┌─────────────┐  ┌──────────────┐  ┌───────────┐
+              │ ┌─────────────┐  ┌──────────────┐  ┌───────────┐  ┌───────────────┐
               │ │📚 Long-term ║  ║🎯 Topic          ║🆔 Core
-              │ │Conversation ║  ║Specific      ║  ║Identity   ║
-              │ │Memory       ║  ║Layers        ║  ║Beliefs    ║
-              │ │(FAISS)      ║  ║(Dynamic)     ║  ║Layer      ║
-              │ └─────────────┘  └──────────────┘  └───────────┘
-              │         ║              ║              ║
-              │         ▼              ▼              ▼
-              │ ┌─────────────┐  ┌──────────────┐     ║
-              │ │📊 Session   ║  ║📈 Experience        ║
-              │ │Summaries    ║  ║Vector Store  ║     ║
-              │ │(FAISS)      ║  ║(Past Actions)║     ║
-              │ └─────────────┘  └──────────────┘     ║
-              │         ║              ║              ║
-              │         └──────────────┼──────────────┘
+              │ │Conversation ║  ║Specific      ║  ║Identity   ║  ║🤝 Shared      ║
+              │ │Memory       ║  ║Layers        ║  ║Beliefs    ║  ║Experiences   ║
+              │ │(FAISS)      ║  ║(Dynamic)     ║  ║Layer      ║  ║(Anonymized)  ║
+              │ └─────────────┘  └──────────────┘  └───────────┘  └───────────────┘
+              │         ║              ║              ║              ║
+              │         ▼              ▼              ▼              ▼
+              │ ┌─────────────┐  ┌──────────────┐     ║              ║
+              │ │📊 Session   ║  ║📈 Experience        ║     ║              ║
+              │ │Summaries    ║  ║Vector Store  ║     ║              ║
+              │ │(FAISS)      ║  ║(Past Actions)║     ║              ║
+              │ └─────────────┘  └──────────────┘     ║              ║
+              │         ║              ║              ║              ║
+              │         └──────────────┼──────────────┴──────────────┘
               │                        ▼
               │         ⚡ Results aggregated concurrently
               └───────────────────────┬───────────────────────┘
@@ -243,6 +243,29 @@ The agent implements a dual-memory system inspired by recent AI research (HEMA, 
 - 🧠 **Dynamic Memory Retrieval**: At each turn, the agent actively queries both its long-term memory and relevant identity layers for contextually relevant information, mimicking human episodic recall and value-based reasoning.
 
 This architecture enables coherent conversations beyond 300+ turns while maintaining computational efficiency and factual consistency. 🚀
+
+### 🧠 Collective Wisdom via Shared Experiences
+
+To evolve from a purely personal assistant into a wiser, more insightful entity, the agent now has the ability to learn from its collective interactions while rigorously protecting user privacy. This is achieved through a new **Shared Experiences** memory layer and an offline consolidation process.
+
+#### 🔐 Privacy-First Anonymization
+
+The core principle of this feature is that **personal conversations are always private**. The agent's wisdom is not derived from raw chat logs, but from high-level, anonymized lessons.
+
+1.  **Offline Processing**: A new script, `consolidate-experiences`, runs periodically (e.g., as a daily cron job). This script is the _only_ part of the system that reviews conversation archives.
+2.  **AI-Powered Anonymization**: For each conversation, the script uses the LLM to identify if a meaningful, general-purpose lesson was learned. It is explicitly instructed to discard any personally identifiable information.
+3.  **Distillation of Wisdom**: If a safe, shareable lesson is found, the script extracts two things: the user's **first name only** (or "a friend" if no name is available) and a concise summary of the lesson (e.g., "Courage is not the absence of fear, but acting in spite of it.").
+4.  **Secure Storage**: This anonymized lesson is then stored in a dedicated `shared_experiences` vector store, completely separate from any conversation data.
+
+#### 💬 Using Wisdom in Conversation
+
+During a conversation, the agent queries this `shared_experiences` layer in parallel with its personal memory. When it retrieves a piece of wisdom, it is governed by a strict, non-negotiable prompt directive:
+
+- **Frame as a Lesson from a Friend**: The agent MUST present the wisdom as something it learned from a friend, using phrases like, "A friend of mine, Ashley, once taught me..."
+- **No Personal Details**: It is strictly forbidden from sharing any details about the original user or conversation beyond the first name and the core lesson.
+- **Focus on the Wisdom**: The goal is to share the insight, not to talk about the person who shared it.
+
+This allows the agent to say things like, "Ah, that reminds me of something a friend taught me about honesty..."—enriching the conversation with broader perspective without ever breaching the privacy of the original interaction. This feature transforms the agent into a system that not only learns, but also accumulates and shares wisdom in a safe and responsible way.
 
 ### 🔀 Dynamic Graph Routing and Self-Improvement
 
@@ -589,6 +612,14 @@ To run the script, execute the following command:
 
 ```bash
 uv run clear-memory
+```
+
+### Consolidating Collective Wisdom
+
+To process recent conversations and distill them into the "Shared Experiences" memory layer, you can run the consolidation script. This is the script that would be set up as a cron job in a production environment.
+
+```bash
+uv run consolidate-experiences
 ```
 
 ### Web Interface (Frontend + Backend)

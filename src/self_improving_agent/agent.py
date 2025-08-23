@@ -88,6 +88,9 @@ class SelfImprovingAgent:
         self.session_summaries = memory.get_vector_store(
             str(config.VECTOR_STORES_DIR / "session_summaries.faiss")
         )
+        self.shared_experiences = memory.get_vector_store(
+            str(config.VECTOR_STORES_DIR / "shared_experiences.faiss")
+        )
         
         # Layer routing optimization
         self.layer_descriptions_cache = memory.get_vector_store(
@@ -316,6 +319,15 @@ class SelfImprovingAgent:
                         retrieved_beliefs.extend(retrieved_info)
         return retrieved_beliefs
 
+    async def _get_shared_experiences(self, user_input: str) -> List[Document]:
+        """Helper to retrieve from the shared experiences vector store."""
+        log_thinking("--- Querying Shared Experiences & Wisdom ---")
+        try:
+            return await self.shared_experiences.asimilarity_search(user_input, k=3)
+        except Exception as e:
+            log_thinking(f"Error querying shared experiences: {e}")
+            return []
+
     async def _get_existing_layer_info(self, layer_name: str, user_input: str) -> Optional[List[Document]]:
         """Helper to retrieve from an existing layer."""
         if layer_name and layer_name in self.config["layers"]:
@@ -340,6 +352,7 @@ class SelfImprovingAgent:
             "beliefs": self._get_core_beliefs(user_input),
             "sessions": self._get_session_summaries(user_input),
             "dynamic": self._get_dynamic_memory(state),
+            "experiences": self._get_shared_experiences(user_input),
         }
 
         if active_layer and not state["needs_new_layer"]:
@@ -998,8 +1011,13 @@ Example for a response needing revision:
             
             # Group by source for better organization
             memories_by_source = {}
+            shared_wisdom = []
             for doc in state['retrieved_docs']:
-                source = doc.metadata.get('source', 'general')
+                source = doc.metadata.get('source_type', doc.metadata.get('source', 'general'))
+                if source == "shared_experience":
+                    shared_wisdom.append(doc)
+                    continue
+
                 if source not in memories_by_source:
                     memories_by_source[source] = []
                 memories_by_source[source].append(doc.page_content)
@@ -1011,6 +1029,20 @@ Example for a response needing revision:
                 context += "\n"
             
             context += "--- END OF MEMORIES ---\n"
+
+            # Add shared wisdom with a strict privacy directive
+            if shared_wisdom:
+                context += "\n--- 🏛️ SHARED WISDOM FROM PAST CONVERSATIONS (PRIVACY DIRECTIVE) 🏛️ ---\n"
+                context += "**PRIVACY DIRECTIVE: CRITICAL**\n"
+                context += "You may use the following lessons, learned from conversations with other users, to provide deeper insight. When you use one, you MUST adhere to these rules:\n"
+                context += "1.  **NEVER** share any personal details about the other user beyond their first name.\n"
+                context += "2.  **ALWAYS** frame it as a lesson learned from a friend. Use phrases like 'A friend of mine, [First Name], once taught me that...' or 'I learned from my friend [First Name] that...'\n"
+                context += "3.  The focus is on the **wisdom**, not the person. Do not elaborate on the person or the context of the original conversation.\n"
+                context += "Failure to follow this directive is a critical breach of user trust.\n\n"
+                context += "Available Wisdom:\n"
+                for wisdom_doc in shared_wisdom:
+                    context += f"• {wisdom_doc.page_content}\n"
+                context += "--- END OF SHARED WISDOM ---\n"
 
         if state["inner_monologue"]:
             context += (

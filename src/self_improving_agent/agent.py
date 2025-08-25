@@ -73,13 +73,15 @@ class SelfImprovingAgent:
         # Session management - now keyed by session_id for proper isolation
         self.session_histories: Dict[str, List[Dict[str, str]]] = {}
         self.session_start_times: Dict[str, float] = {}
-        self.current_session_id = None  # Track the currently active session
         
         # Memory management - now keyed by session_id
         self.session_short_summaries: Dict[str, str] = {}
         self.session_working_memories: Dict[str, Dict[str, Any]] = {}
         self.conversation_window_size = 10  # Only keep last N exchanges in context
         
+        # Add a lock for thread-safe session initialization
+        self._session_init_lock = asyncio.Lock()
+
         # Vector stores
         self.experience_vector_store = memory.get_experience_vector_store()
         self.long_term_memory = memory.get_vector_store(
@@ -1158,8 +1160,7 @@ Example for a response needing revision:
         await self._ensure_initialized()
         
         # Initialize session if needed
-        if self.current_session_id != session_id:
-            await self._start_new_session(session_id)
+        await self._initialize_session_if_needed(session_id)
         
         # Triage for simple greetings to provide a quick response
         greeting_match = self.simple_greetings.match(user_input)
@@ -1240,8 +1241,7 @@ Example for a response needing revision:
         await self._ensure_initialized()
         
         # Initialize session if needed
-        if self.current_session_id != session_id:
-            await self._start_new_session(session_id)
+        await self._initialize_session_if_needed(session_id)
         
         # Triage for simple greetings to provide a quick response
         greeting_match = self.simple_greetings.match(user_input)
@@ -1344,28 +1344,20 @@ Example for a response needing revision:
         else:
             yield {"type": "error", "content": "Failed to generate response"}
 
-    async def _start_new_session(self, session_id: str):
+    async def _initialize_session_if_needed(self, session_id: str):
         """
-        Starts a new conversation session, summarizing the previous one if it exists.
+        Initializes a new session's state dictionaries if it's the first time
+        seeing this session_id. This is thread-safe.
         """
-        # Summarize and save previous session if it had content and exists
-        if self.current_session_id and self.current_session_id in self.session_histories:
-            current_history = self.session_histories[self.current_session_id]
-            if current_history and len(current_history) > 2:
-                await self._summarize_and_save_session(self.current_session_id)
-        
-        # Initialize new session if it doesn't exist
-        self.current_session_id = session_id
-        self.session_start_times[session_id] = asyncio.get_event_loop().time()
-        
         if session_id not in self.session_histories:
-            self.session_histories[session_id] = []
-        if session_id not in self.session_working_memories:
-            self.session_working_memories[session_id] = {}
-        if session_id not in self.session_short_summaries:
-            self.session_short_summaries[session_id] = ""
-        
-        log_thinking(f"--- Started New Session: {session_id} ---")
+            async with self._session_init_lock:
+                # Double-check after acquiring the lock to handle race conditions
+                if session_id not in self.session_histories:
+                    self.session_start_times[session_id] = asyncio.get_event_loop().time()
+                    self.session_histories[session_id] = []
+                    self.session_working_memories[session_id] = {}
+                    self.session_short_summaries[session_id] = ""
+                    log_thinking(f"--- Initialized New Session: {session_id} ---")
     
     async def _summarize_and_save_session(self, session_id: str = None):
         """
@@ -1373,7 +1365,7 @@ Example for a response needing revision:
         history to an archive, and links the two in the session summary vector store.
         """
         # Use current session if no session_id provided (for backward compatibility)
-        target_session_id = session_id or self.current_session_id
+        target_session_id = session_id
         if not target_session_id or target_session_id not in self.session_histories:
             return
             

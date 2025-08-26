@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 import sys
 import os
+
 # Add the src directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -42,8 +43,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Single agent instance - it handles session isolation internally
+# Single agent instance - handles session isolation through fixes in the agent class
 agent = None
+
 db_path = os.getenv("DATABASE_PATH", "conversations.db")
 
 

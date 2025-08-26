@@ -1227,7 +1227,8 @@ Example for a response needing revision:
 
         # Update the session-specific state
         self.session_short_summaries[session_id] = final_state["short_term_summary"]
-        self.core_identity = final_state["core_identity"]
+        # DO NOT update self.core_identity here - it causes race conditions between concurrent sessions
+        # Each session should work with its own copy of core_identity passed in the initial_state
         self.session_working_memories[session_id] = final_state.get("working_memory", {})
         
         log_thinking(f"--- Session {session_id} Working Memory: {self.session_working_memories[session_id]} ---")
@@ -1335,7 +1336,7 @@ Example for a response needing revision:
 
             # Update the session-specific state
             self.session_short_summaries[session_id] = final_state.get("short_term_summary", self.session_short_summaries.get(session_id, ""))
-            self.core_identity = final_state.get("core_identity", self.core_identity)
+            # DO NOT update self.core_identity here - it causes race conditions between concurrent sessions  
             self.session_working_memories[session_id] = final_state.get("working_memory", {})
             
             log_thinking(f"--- Session {session_id} Working Memory: {self.session_working_memories[session_id]} ---")

@@ -22,6 +22,7 @@ class AgentState(TypedDict):
     """
     Represents the state of the agent at any given time.
     """
+    session_id: str
     user_input: str
     conversation_history: List[Dict[str, str]]
     short_term_summary: str  # A running summary of the recent conversation
@@ -273,7 +274,7 @@ class SelfImprovingAgent:
 
         return state
 
-    async def _get_dynamic_memory(self, state: AgentState) -> str:
+    async def _get_dynamic_memory(self, state: AgentState) -> List[Document]:
         """Helper to retrieve from long-term conversational memory."""
         log_thinking("--- Querying Long-Term Conversational Memory ---")
         user_input = state["user_input"]
@@ -362,6 +363,7 @@ class SelfImprovingAgent:
         log_thinking("--- Parallel Memory Retrieval (with Speculative Layer Proposal) ---")
         user_input = state["user_input"]
         active_layer = state.get("active_layer")
+        session_id = state["session_id"]
 
         tasks = {
             "beliefs": self._get_core_beliefs(user_input),
@@ -383,42 +385,47 @@ class SelfImprovingAgent:
         results_map = dict(zip(tasks.keys(), results))
         all_docs = []
         
-        # Special handling for session summaries to re-rank by recency
+        # 1. Process session summaries (session-specific)
         if 'sessions' in results_map and isinstance(results_map['sessions'], list):
-            # Pop the session docs to handle them separately and add them to all_docs
-            session_docs = results_map.pop('sessions')
-            all_docs.extend(session_docs)
-            log_thinking(f"--- Retrieved {len(session_docs)} docs from sessions ---")
-
-            log_thinking("--- Re-ranking session summaries by recency ---")
+            session_docs = [
+                doc for doc in results_map.pop('sessions')
+                if doc.metadata.get('session_id') == session_id
+            ]
+            log_thinking(f"--- Retrieved and filtered {len(session_docs)} session summaries for session {session_id} ---")
             
-            # Sort docs by creation_timestamp, newest first
-            # We parse the ISO string back to a datetime object for safe comparison
-            sorted_sessions = sorted(
-                session_docs,
-                key=lambda doc: datetime.fromisoformat(ts) if (ts := doc.metadata.get('creation_timestamp')) else datetime.min,
-                reverse=True
-            )
-            
-            # Keep only the top N most recent summaries
-            recent_sessions = sorted_sessions[:3]
-            state['recent_sessions_context'] = "\n".join([doc.page_content for doc in recent_sessions])
-            log_thinking(f"--- Top {len(recent_sessions)} recent sessions selected and isolated ---")
+            if session_docs:
+                log_thinking("--- Re-ranking session summaries by recency ---")
+                sorted_sessions = sorted(
+                    session_docs,
+                    key=lambda doc: datetime.fromisoformat(ts) if (ts := doc.metadata.get('creation_timestamp')) else datetime.min,
+                    reverse=True
+                )
+                recent_sessions = sorted_sessions[:3]
+                state['recent_sessions_context'] = "\n".join([doc.page_content for doc in recent_sessions])
+                all_docs.extend(sorted_sessions)
 
+        # 2. Process long-term memory (session-specific)
+        if 'dynamic' in results_map and isinstance(results_map['dynamic'], list):
+            dynamic_docs = [
+                doc for doc in results_map.pop('dynamic')
+                if doc.metadata.get("session_id") == session_id
+            ]
+            log_thinking(f"--- Retrieved and filtered {len(dynamic_docs)} long-term memories for session {session_id} ---")
+            all_docs.extend(dynamic_docs)
+        
+        # 3. Process remaining global memories and handle speculative proposal
         for task_name, result in results_map.items():
             if isinstance(result, Exception):
                 log_thinking(f"--- Error during {task_name} retrieval: {result} ---")
                 continue
+            
+            if task_name == 'speculative_proposal':
+                log_thinking("--- Speculative layer proposal completed ---")
+                continue
 
             if result and isinstance(result, list):
-                # Now all results are expected to be List[Document]
                 all_docs.extend(result)
-                log_thinking(f"--- Retrieved {len(result)} docs from {task_name} ---")
-
-        # Handle speculative proposal result if it exists
-        if 'speculative_proposal' in results_map and not isinstance(results_map['speculative_proposal'], Exception):
-            # The proposal has already updated the state, no need to do anything
-            log_thinking("--- Speculative layer proposal completed ---")
+                log_thinking(f"--- Retrieved {len(result)} docs from global memory: {task_name} ---")
 
         state['retrieved_docs'] = all_docs
         return state
@@ -1138,7 +1145,8 @@ Example for a response needing revision:
         memory.add_to_memory(
             self.long_term_memory,
             turn_text,
-            str(config.VECTOR_STORES_DIR / "long_term_conversation_memory.faiss")
+            str(config.VECTOR_STORES_DIR / "long_term_conversation_memory.faiss"),
+            metadata={"session_id": state["session_id"]}
         )
 
         # Update semantic cache
@@ -1186,6 +1194,7 @@ Example for a response needing revision:
         ] if self.conversation_window_size > 0 else current_history
 
         initial_state = {
+            "session_id": session_id,
             "user_input": user_input,
             "conversation_history": history_window,  # Pass the windowed history
             "short_term_summary": self.session_short_summaries.get(session_id, ""),
@@ -1271,6 +1280,7 @@ Example for a response needing revision:
         ] if self.conversation_window_size > 0 else current_history
 
         initial_state = {
+            "session_id": session_id,
             "user_input": user_input,
             "conversation_history": history_window, # Pass the windowed history
             "short_term_summary": self.session_short_summaries.get(session_id, ""),

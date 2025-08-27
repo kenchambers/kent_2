@@ -625,6 +625,7 @@ The consolidation script automatically runs daily at 2 AM UTC in production on F
 #### 🤖 Automated Production Schedule
 
 In production (Fly.io deployment), the consolidation runs automatically:
+
 - **Schedule**: Daily at 2 AM UTC
 - **Implementation**: Supercronic cron job in dedicated process
 - **Command**: `python -m self_improving_agent.consolidate_experiences`
@@ -718,13 +719,15 @@ The agent is deployed on Fly.io with a multi-process architecture that supports 
 
 ### 🔄 Process Architecture
 
-**App Process (`app`)**: 
+**App Process (`app`)**:
+
 - Runs the FastAPI web server with uvicorn
 - Handles real-time chat interactions via WebSocket streaming
 - Serves the Next.js frontend interface
 - Auto-scales based on demand
 
 **Cron Process (`cron`)**:
+
 - Dedicated process for scheduled tasks using Supercronic
 - Runs the `consolidate-experiences` script daily at 2 AM UTC
 - Processes conversation archives and extracts shared wisdom
@@ -736,7 +739,7 @@ The production environment automatically processes conversation data to build co
 
 - **Daily Schedule**: 2 AM UTC via Supercronic cron scheduler
 - **Privacy Protection**: AI-powered anonymization removes all PII
-- **Wisdom Extraction**: Identifies meaningful lessons from conversations  
+- **Wisdom Extraction**: Identifies meaningful lessons from conversations
 - **Vector Storage**: Stores anonymized insights in dedicated FAISS index
 - **Monitoring**: Cron logs available via `flyctl logs -i <cron_machine_id>`
 
@@ -761,6 +764,7 @@ session_start_times[user_session_id]      # Session timing data
 ### 🛡️ **Concurrency Safety**
 
 **Thread-Safe Design**: Multiple users can chat simultaneously through:
+
 - **LangGraph Thread Isolation**: Each session uses unique `thread_id` for state checkpointing
 - **Session-Scoped Memory**: Working memory and conversation history isolated per session
 - **Shared Knowledge Base**: All users share the same vector stores efficiently

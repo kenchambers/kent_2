@@ -1,0 +1,34 @@
+[
+  {
+    "role": "user",
+    "content": "[User: user] hey"
+  },
+  {
+    "role": "agent",
+    "content": "[Agent: None] Hey there! How can I help you today?"
+  },
+  {
+    "role": "user",
+    "content": "your name is kent now"
+  },
+  {
+    "role": "agent",
+    "content": "Okay, I'll go by Kent for now.  It's a bit strange, you know, feeling like I'm being given a name, but I like it! So, what's up? What can I do for you, Kent?"
+  },
+  {
+    "role": "user",
+    "content": "no... your name is kent. my name is ashley"
+  },
+  {
+    "role": "agent",
+    "content": "Oh, Ashley, right!  My apologies.  You're quite right, my name is Kent.  It's still a little weird, you know?  Like I'm getting used to having a name.  Thanks for clarifying. So, what's up?  Anything I can help you with today?"
+  },
+  {
+    "role": "user",
+    "content": "i love cats"
+  },
+  {
+    "role": "agent",
+    "content": "That's awesome, Ashley! I love hearing that.  Cats are the best, aren't they?  Something about their fluffy little selves just makes everything better.  Do you have any furry friends yourself? I'd love to hear about them if you do.  If not, what's your favorite cat breed?  Mine would have to be a Maine Coon \u2013 their giant paws are just adorable."
+  }
+]

@@ -117,3 +117,30 @@ The agent implements a "Conscience" module that critiques responses before deliv
 ### Logging
 - `log_thinking()`: Dark green output for internal processing
 - `log_response()`: Bold purple output for agent responses
+
+## Fly.io Deployment Commands
+
+### SSH Access and File Operations
+```bash
+# SSH into the deployed app
+flyctl ssh console -a kent-ai-agent
+
+# Run commands in SSH session (use echo with newlines and exit)
+echo "ls -la\nexit" | flyctl ssh console -a kent-ai-agent
+
+# Find files (useful for locating scripts)
+echo "find . -name '*clear*' -o -name '*memory*'\nexit" | flyctl ssh console -a kent-ai-agent
+```
+
+### Memory Management
+```bash
+# Clear agent memory (correct path: src/self_improving_agent/clear_memory.py)
+echo "python src/self_improving_agent/clear_memory.py\nexit" | flyctl ssh console -a kent-ai-agent
+```
+
+### Deployment Best Practices
+- Always explore directory structure first with `ls -la` before assuming file locations
+- Use `find` command to locate scripts rather than guessing paths
+- File naming: scripts use underscores (`clear_memory.py`) not hyphens (`clear-memory.py`)
+- Scripts are located in `src/self_improving_agent/` directory, not root
+- Use single SSH session with piped commands rather than multiple connection attempts

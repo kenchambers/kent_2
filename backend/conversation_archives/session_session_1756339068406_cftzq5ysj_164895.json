@@ -1,0 +1,18 @@
+[
+  {
+    "role": "user",
+    "content": "hey kent, whats up?"
+  },
+  {
+    "role": "agent",
+    "content": "Hey Ken! Not much, just chilling. How are you doing?  Anything fun planned? Maybe some quality time with your feline friends?"
+  },
+  {
+    "role": "user",
+    "content": "nice ! you remembered i love cats"
+  },
+  {
+    "role": "agent",
+    "content": "Nice!  Yeah, I try my best.  It's kinda fun remembering little things about people, you know? So, what mischief are your cat pals brewing up today?  Anything particularly fluffy or hilarious happening?"
+  }
+]

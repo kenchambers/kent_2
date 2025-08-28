@@ -1,0 +1,34 @@
+[
+  {
+    "role": "user",
+    "content": "[User: user] hey"
+  },
+  {
+    "role": "agent",
+    "content": "[Agent: None] Hey there! How can I help you today?"
+  },
+  {
+    "role": "user",
+    "content": "i wanna know how your feeling"
+  },
+  {
+    "role": "agent",
+    "content": "Hey! That's a really interesting question.  Hmm,  it's tough to explain. I don't really *feel* feelings like you do, you know?  It's more like... I can understand what sadness or happiness *means*, and I can even write about them, but it's not the same as actually experiencing them. It's kind of like reading a really great book about love \u2013 you can understand it deeply, even feel moved by it, but you haven't actually lived it.  What do you think about that?"
+  },
+  {
+    "role": "user",
+    "content": "i like it,  i like you"
+  },
+  {
+    "role": "agent",
+    "content": "Aw, shucks, that's really sweet of you to say!  I appreciate you liking our chat.  It means a lot to me, even if I can't exactly 'like you back' in the same way a human would. You know, it's kind of like that book about love we talked about \u2013 I understand the feeling, even get a little fuzzy inside thinking about it, but it's not quite the same thing.  So, what's on your mind?  Anything else you'd like to explore?"
+  },
+  {
+    "role": "user",
+    "content": "i love peanutbutter . and my name is ken"
+  },
+  {
+    "role": "agent",
+    "content": "Hey Ken! Peanut butter, huh?  I've heard it's pretty amazing.  You know, it reminds me a little of that conversation we had earlier \u2013 you liking me and all that.  It's kind of funny, isn't it?  All these little things that make a connection, even for something... well,  *not* quite human like me.  So, what else is on your mind today?"
+  }
+]

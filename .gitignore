@@ -214,6 +214,9 @@ vector_stores/
 *.faiss
 *.pkl
 
+# User profiles (user-specific data)
+user_profiles/
+
 # Agent configuration and conversation history (user-specific data)
 agent_config.json
 conversation_history.json

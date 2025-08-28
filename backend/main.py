@@ -24,6 +24,7 @@ from self_improving_agent.utils import set_thinking_callback
 class ChatMessage(BaseModel):
     message: str
     session_id: str = "default"
+    user_id: str = "default_user"
 
 
 class ChatResponse(BaseModel):
@@ -482,7 +483,11 @@ async def chat_stream(message: ChatMessage):
             set_thinking_callback(thinking_callback)
             
             # Start agent processing using native streaming
-            agent_stream = agent_instance.astream(message.message, session_id=message.session_id)
+            agent_stream = agent_instance.astream(
+                message.message,
+                session_id=message.session_id,
+                user_id=message.user_id,
+            )
             agent_task = asyncio.create_task(anext(agent_stream))
             
             response_content = None
@@ -563,7 +568,9 @@ async def chat(message: ChatMessage):
         agent_instance = await get_agent()
         
         # Get response from agent
-        response = await agent_instance.arun(message.message, session_id=message.session_id)
+        response = await agent_instance.arun(
+            message.message, session_id=message.session_id, user_id=message.user_id
+        )
         
         # Save conversation
         save_conversation(message.session_id, message.message, response)

@@ -15,6 +15,7 @@ from langchain_core.documents import Document
 from datetime import datetime
 from . import config
 from . import memory
+from . import user_profile
 from .utils import create_layer_name, log_thinking
 
 
@@ -23,6 +24,7 @@ class AgentState(TypedDict):
     Represents the state of the agent at any given time.
     """
     session_id: str
+    user_id: str  # Add a persistent user_id
     user_input: str
     conversation_history: List[Dict[str, str]]
     short_term_summary: str  # A running summary of the recent conversation
@@ -40,6 +42,7 @@ class AgentState(TypedDict):
     emotional_context: Optional[str]
 
     working_memory: Dict[str, Any]  # Key facts from current conversation (names, roles, etc)
+    user_profile: Dict[str, Any]  # User profile data including name, facts, vector store path
     retrieved_docs: List[Any] # To hold retrieved Document objects with metadata
     drill_down_needed: bool # Flag to signal if we need to load full history
     archive_to_load: Optional[str] # Path to the specific archive file
@@ -78,6 +81,7 @@ class SelfImprovingAgent:
         # Memory management - now keyed by session_id
         self.session_short_summaries: Dict[str, str] = {}
         self.session_working_memories: Dict[str, Dict[str, Any]] = {}
+        self.session_user_profiles: Dict[str, Dict[str, Any]] = {}  # Cache user profiles per session
         self.conversation_window_size = 10  # Only keep last N exchanges in context
         
         # Add a lock for thread-safe session initialization
@@ -344,6 +348,25 @@ class SelfImprovingAgent:
             log_thinking(f"Error querying shared experiences: {e}")
             return []
 
+    async def _get_user_profile_info(self, state: AgentState) -> List[Document]:
+        """Helper to retrieve from the user's profile vector store."""
+        log_thinking("--- Querying User Profile Information ---")
+        user_input = state["user_input"]
+        user_profile = state.get("user_profile", {})
+        
+        if not user_profile or not user_profile.get("vector_store_path"):
+            log_thinking("--- No user profile vector store available ---")
+            return []
+        
+        try:
+            user_vector_store = memory.get_vector_store(user_profile["vector_store_path"])
+            retrieved_info = memory.query_memory(user_vector_store, user_input, k=3)
+            log_thinking(f"--- Retrieved {len(retrieved_info) if retrieved_info else 0} user profile docs ---")
+            return retrieved_info or []
+        except Exception as e:
+            log_thinking(f"Error querying user profile: {e}")
+            return []
+
     async def _get_existing_layer_info(self, layer_name: str, user_input: str) -> Optional[List[Document]]:
         """Helper to retrieve from an existing layer."""
         if layer_name and layer_name in self.config["layers"]:
@@ -370,6 +393,7 @@ class SelfImprovingAgent:
             "sessions": self._get_session_summaries(user_input),
             "dynamic": self._get_dynamic_memory(state),
             "experiences": self._get_shared_experiences(state),
+            "user_profile": self._get_user_profile_info(state),
         }
 
         if active_layer and not state["needs_new_layer"]:
@@ -452,6 +476,7 @@ class SelfImprovingAgent:
         workflow.add_node("query_semantic_cache", self._query_semantic_cache)
         workflow.add_node("update_core_identity", self._update_core_identity)
         workflow.add_node("update_working_memory", self._update_working_memory)
+        workflow.add_node("update_user_profile", self._update_user_profile)
         workflow.add_node("decide_drill_down", self._decide_drill_down)
         workflow.add_node("load_full_history", self._load_full_history)
         workflow.add_node("verify_layer_creation", self._verify_layer_creation)
@@ -459,7 +484,8 @@ class SelfImprovingAgent:
         workflow.set_entry_point("initial_analysis_and_routing")
 
         workflow.add_edge("initial_analysis_and_routing", "update_working_memory")
-        workflow.add_edge("update_working_memory", "parallel_memory_retrieval")
+        workflow.add_edge("update_working_memory", "update_user_profile")
+        workflow.add_edge("update_user_profile", "parallel_memory_retrieval")
 
         workflow.add_conditional_edges(
             "parallel_memory_retrieval",
@@ -716,6 +742,95 @@ class SelfImprovingAgent:
                 log_thinking(f"--- Working Memory Updated: {new_facts} ---")
         except (json.JSONDecodeError, IndexError) as e:
             log_thinking(f"--- Working Memory: Could not extract facts --- Error: {e}")
+        
+        return state
+
+    async def _update_user_profile(self, state: AgentState) -> AgentState:
+        """
+        Updates the user profile with new information from the conversation.
+        Detects user name introductions and updates user facts.
+        """
+        log_thinking("--- Updating User Profile ---")
+        
+        session_id = state["session_id"]
+        user_id = state["user_id"] # Get the persistent user_id from state
+        
+        current_profile = await user_profile.get_user_profile(user_id) # Use user_id
+        state["user_profile"] = current_profile
+        # Cache the profile for conversation formatting, keyed by session_id for the current session
+        self.session_user_profiles[session_id] = current_profile
+        
+        # Check if user introduced themselves or shared new information
+        profile_update_prompt = f"""
+        Analyze this user input to detect if the user is introducing themselves or sharing personal information that should be saved to their profile.
+        
+        User input: "{state['user_input']}"
+        Current user profile: {current_profile}
+        Working memory: {state.get('working_memory', {})}
+        
+        Look for:
+        - User introducing themselves with their name (e.g., "I'm Ken", "My name is Sarah", "Call me Alex")
+        - Personal facts about the user (preferences, background, etc.)
+        
+        IMPORTANT: Only update the user's profile, not the agent's profile.
+        
+        Respond with a JSON object with any updates to make to the user profile:
+        - "name": if the user introduced themselves
+        - "facts": a dictionary of personal facts about the user
+        
+        If no updates needed, respond with: {{"no_updates": true}}
+        
+        Example:
+        {{"name": "Ken", "facts": {{"profession": "software engineer", "location": "California"}}}}
+        """
+        
+        response = await self.llm.ainvoke([HumanMessage(content=profile_update_prompt)])
+        response_text = response.content.strip()
+        
+        try:
+            # Extract JSON from response
+            if "```json" in response_text:
+                json_str = response_text.split("```json")[1].split("```")[0].strip()
+            else:
+                json_str = response_text[response_text.find('{'):response_text.rfind('}') + 1]
+            
+            profile_updates = json.loads(json_str)
+            
+            if not profile_updates.get("no_updates", False):
+                profile_changed = False
+                
+                # Update name if provided
+                if "name" in profile_updates and profile_updates["name"] != current_profile["name"]:
+                    current_profile["name"] = profile_updates["name"]
+                    profile_changed = True
+                    log_thinking(f"--- User name updated to: {profile_updates['name']} ---")
+                
+                # Update facts if provided
+                if "facts" in profile_updates:
+                    current_profile["facts"].update(profile_updates["facts"])
+                    profile_changed = True
+                    log_thinking(f"--- User facts updated: {profile_updates['facts']} ---")
+                
+                # Save profile if changed
+                if profile_changed:
+                    await user_profile.save_user_profile(user_id, current_profile) # Use user_id
+                    
+                    # Also save to user's vector store for future retrieval
+                    user_vector_store = memory.get_vector_store(current_profile["vector_store_path"])
+                    user_info_summary = f"User profile: Name is {current_profile['name']}. Facts: {current_profile['facts']}"
+                    memory.add_to_memory(
+                        user_vector_store,
+                        user_info_summary,
+                        current_profile["vector_store_path"],
+                        metadata={"source": "user_profile", "user_id": user_id} # Use user_id
+                    )
+                    
+                    state["user_profile"] = current_profile
+                    # Cache the profile for conversation formatting
+                    self.session_user_profiles[session_id] = current_profile
+        
+        except (json.JSONDecodeError, IndexError) as e:
+            log_thinking(f"--- User Profile: Could not extract updates --- Error: {e}")
         
         return state
 
@@ -1075,6 +1190,25 @@ Example for a response needing revision:
                 "--- END INNER MONOLOGUE ---\n"
             )
 
+        # Add user profile information if available
+        if state.get("user_profile"):
+            user_profile = state["user_profile"]
+            context += f"\n--- USER PROFILE ---\n"
+            context += f"User's name: {user_profile.get('name', 'User')}\n"
+            if user_profile.get('facts'):
+                context += f"User facts: {user_profile['facts']}\n"
+            context += "--- END USER PROFILE ---\n"
+
+        # Conversation format instructions
+        context += (
+            "\n--- CONVERSATION FORMAT INSTRUCTIONS ---\n"
+            "IMPORTANT: When you see conversation history, it will be formatted with name tags:\n"
+            "- [User: Name] indicates what the user said\n"
+            "- [Agent: Name] indicates what you (the agent) said in previous exchanges\n"
+            "When referring to previous conversations, understand that 'Agent' refers to you.\n"
+            "--- END CONVERSATION FORMAT INSTRUCTIONS ---\n"
+        )
+
         # Self-awareness prompt
         context += (
             "\n--- SELF-AWARENESS CHECK ---\n"
@@ -1141,12 +1275,17 @@ Example for a response needing revision:
         )
 
         # Save the current turn to long-term memory
-        turn_text = f"User: {state['user_input']}\nAgent: {state['response']}"
+        user_name = self._get_user_name_for_session(state["session_id"])
+        agent_name = self.core_identity.get('name', 'Agent')
+        turn_text = (
+            f"[User: {user_name}] {state['user_input']}\n"
+            f"[Agent: {agent_name}] {state['response']}"
+        )
         memory.add_to_memory(
             self.long_term_memory,
             turn_text,
             str(config.VECTOR_STORES_DIR / "long_term_conversation_memory.faiss"),
-            metadata={"session_id": state["session_id"]}
+            metadata={"session_id": state["session_id"], "user_id": state["user_id"]} # Add user_id to metadata
         )
 
         # Update semantic cache
@@ -1161,14 +1300,14 @@ Example for a response needing revision:
             self.checkpointer = AsyncSqliteSaver(self.conn)
             self.graph = self._build_graph()
 
-    async def arun(self, user_input: str, session_id: str = "default_session"):
+    async def arun(self, user_input: str, session_id: str = "default_session", user_id: str = "default_user"):
         """
         Runs the agent.
         """
         await self._ensure_initialized()
         
         # Initialize session if needed
-        await self._initialize_session_if_needed(session_id)
+        await self._initialize_session_if_needed(session_id, user_id)
         
         # Triage for simple greetings to provide a quick response
         greeting_match = self.simple_greetings.match(user_input)
@@ -1183,8 +1322,8 @@ Example for a response needing revision:
             
             if session_id not in self.session_histories:
                 self.session_histories[session_id] = []
-            self.session_histories[session_id].append({"role": "user", "content": user_input})
-            self.session_histories[session_id].append({"role": "agent", "content": response})
+            self.session_histories[session_id].append(self._format_conversation_entry("user", user_input, session_id))
+            self.session_histories[session_id].append(self._format_conversation_entry("agent", response, session_id))
             return response
         
         # Keep the conversation history within the window size
@@ -1195,6 +1334,7 @@ Example for a response needing revision:
 
         initial_state = {
             "session_id": session_id,
+            "user_id": user_id,
             "user_input": user_input,
             "conversation_history": history_window,  # Pass the windowed history
             "short_term_summary": self.session_short_summaries.get(session_id, ""),
@@ -1211,6 +1351,7 @@ Example for a response needing revision:
             "core_identity": self.core_identity,
             "emotional_context": None,
             "working_memory": self.session_working_memories.get(session_id, {}).copy(),  # Pass session working memory
+            "user_profile": {},  # Will be loaded in update_user_profile node
             "retrieved_docs": [],
             "drill_down_needed": False,
             "archive_to_load": None,
@@ -1228,10 +1369,10 @@ Example for a response needing revision:
         if session_id not in self.session_histories:
             self.session_histories[session_id] = []
         self.session_histories[session_id].append(
-            {"role": "user", "content": user_input}
+            self._format_conversation_entry("user", user_input, session_id)
         )
         self.session_histories[session_id].append(
-            {"role": "agent", "content": final_state["response"]}
+            self._format_conversation_entry("agent", final_state["response"], session_id)
         )
 
         # Update the session-specific state
@@ -1244,14 +1385,14 @@ Example for a response needing revision:
 
         return final_state["response"]
 
-    async def astream(self, user_input: str, session_id: str = "default_session"):
+    async def astream(self, user_input: str, session_id: str = "default_session", user_id: str = "default_user"):
         """
         Streams the agent's processing in real-time.
         """
         await self._ensure_initialized()
         
         # Initialize session if needed
-        await self._initialize_session_if_needed(session_id)
+        await self._initialize_session_if_needed(session_id, user_id)
         
         # Triage for simple greetings to provide a quick response
         greeting_match = self.simple_greetings.match(user_input)
@@ -1268,8 +1409,8 @@ Example for a response needing revision:
             
             if session_id not in self.session_histories:
                 self.session_histories[session_id] = []
-            self.session_histories[session_id].append({"role": "user", "content": user_input})
-            self.session_histories[session_id].append({"role": "agent", "content": response})
+            self.session_histories[session_id].append(self._format_conversation_entry("user", user_input, session_id))
+            self.session_histories[session_id].append(self._format_conversation_entry("agent", response, session_id))
             yield {"type": "response", "content": response}
             return
 
@@ -1281,6 +1422,7 @@ Example for a response needing revision:
 
         initial_state = {
             "session_id": session_id,
+            "user_id": user_id,
             "user_input": user_input,
             "conversation_history": history_window, # Pass the windowed history
             "short_term_summary": self.session_short_summaries.get(session_id, ""),
@@ -1297,6 +1439,7 @@ Example for a response needing revision:
             "core_identity": self.core_identity,
             "emotional_context": None,
             "working_memory": self.session_working_memories.get(session_id, {}).copy(),  # Pass session working memory
+            "user_profile": {},  # Will be loaded in update_user_profile node
             "retrieved_docs": [],
             "drill_down_needed": False,
             "archive_to_load": None,
@@ -1355,7 +1498,25 @@ Example for a response needing revision:
         else:
             yield {"type": "error", "content": "Failed to generate response"}
 
-    async def _initialize_session_if_needed(self, session_id: str):
+    def _get_user_name_for_session(self, session_id: str) -> str:
+        """Get the user name for a session, defaulting to 'User' if not set."""
+        if session_id in self.session_user_profiles:
+            return self.session_user_profiles[session_id].get('name', 'User')
+        return 'User'
+
+    def _format_conversation_entry(self, role: str, content: str, session_id: str) -> Dict[str, str]:
+        """
+        Formats a conversation entry with proper name tags like [User: Ken] and [Agent: Kent].
+        """
+        user_name = self._get_user_name_for_session(session_id)
+        agent_name = self.core_identity.get('name', 'Agent')
+        
+        name = user_name if role == "user" else agent_name
+        tagged_content = f"[{role.capitalize()}: {name}] {content}"
+        
+        return {"role": role, "content": tagged_content}
+
+    async def _initialize_session_if_needed(self, session_id: str, user_id: str):
         """
         Initializes a new session's state dictionaries if it's the first time
         seeing this session_id. This is thread-safe.
@@ -1368,7 +1529,9 @@ Example for a response needing revision:
                     self.session_histories[session_id] = []
                     self.session_working_memories[session_id] = {}
                     self.session_short_summaries[session_id] = ""
-                    log_thinking(f"--- Initialized New Session: {session_id} ---")
+                    # Load the persistent user profile and cache it for this session
+                    self.session_user_profiles[session_id] = await user_profile.get_user_profile(user_id)
+                    log_thinking(f"--- Initialized New Session: {session_id} for User: {user_id} ---")
     
     async def _summarize_and_save_session(self, session_id: str = None):
         """
@@ -1400,7 +1563,8 @@ Example for a response needing revision:
         # 3. Create conversation text for summarization
         conversation_text = ""
         for msg in session_history:
-            conversation_text += f"{msg['role'].upper()}: {msg['content']}\n"
+            # The history is already formatted, so we just join the content
+            conversation_text += f"{msg['content']}\n"
         
         # Get session-specific working memory
         session_working_memory = self.session_working_memories.get(target_session_id, {})
@@ -1429,8 +1593,10 @@ Example for a response needing revision:
         
         # 5. Save summary to vector store with metadata linking to the archive
         session_start_time = self.session_start_times.get(target_session_id, timestamp)
+        user_id = self.session_user_profiles.get(target_session_id, {}).get('id', 'unknown_user')
         summary_metadata = {
             "session_id": target_session_id,
+            "user_id": user_id,
             "start_time": session_start_time,
             "end_time": timestamp,
             "archive_path": str(archive_path),

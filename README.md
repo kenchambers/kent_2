@@ -71,14 +71,14 @@ Here's how the self-improving agent's layers work together:
               │           🧠 PARALLEL MEMORY RETRIEVAL
               │            (asyncio.gather concurrent execution)
               │
-              │ ┌─────────────┐  ┌──────────────┐  ┌───────────┐  ┌───────────────┐
-              │ │📚 Long-term ║  ║🎯 Topic          ║🆔 Core
-              │ │Conversation ║  ║Specific      ║  ║Identity   ║  ║🤝 Shared      ║
-              │ │Memory       ║  ║Layers        ║  ║Beliefs    ║  ║Experiences   ║
-              │ │(FAISS)      ║  ║(Dynamic)     ║  ║Layer      ║  ║(Anonymized)  ║
-              │ └─────────────┘  └──────────────┘  └───────────┘  └───────────────┘
-              │         ║              ║              ║              ║
-              │         ▼              ▼              ▼              ▼
+              │ ┌─────────────┐  ┌──────────────┐  ┌───────────┐  ┌───────────────┐  ┌───────────────┐
+              │ │📚 Long-term ║  ║🎯 Topic          ║🆔 Core        ║🤝 Shared          ║👤 User        ║
+              │ │Conversation ║  ║Specific      ║  ║Identity   ║  ║Experiences   ║  ║Profile        ║
+              │ │Memory       ║  ║Layers        ║  ║Beliefs    ║  ║(Anonymized)  ║  ║Information    ║
+              │ │(FAISS)      ║  ║(Dynamic)     ║  ║Layer      ║  ║              ║  ║(Per-User)     ║
+              │ └─────────────┘  └──────────────┘  └───────────┘  └───────────────┘  └───────────────┘
+              │         ║              ║              ║              ║              ║
+              │         ▼              ▼              ▼              ▼              ▼
               │ ┌─────────────┐  ┌──────────────┐     ║              ║
               │ │📊 Session   ║  ║📈 Experience        ║     ║              ║
               │ │Summaries    ║  ║Vector Store  ║     ║              ║
@@ -134,7 +134,9 @@ Here's how the self-improving agent's layers work together:
 - **🎭 Emotional Intelligence**: Analyzes user sentiment and adapts communication style
 - **🧭 Dynamic Routing**: Decides whether to use existing knowledge or create new memory layers
 - **🔍 Layer Descriptions Cache**: Efficiently identifies relevant topic layers through semantic search
-- **🧠 Parallel Memory Access**: Uses `asyncio.gather()` to query up to 4 specialized vector stores concurrently (core beliefs, session summaries, long-term conversation, and optionally one topic-specific layer)
+- **🧠 Parallel Memory Access**: Uses `asyncio.gather()` to query up to 5 specialized vector stores concurrently (core beliefs, session summaries, long-term conversation, user profiles, and optionally one topic-specific layer)
+- **👤 User Profile System**: Maintains persistent user profiles with automatic name detection and personal information tracking
+- **💬 Named Conversation Format**: Uses clear `[User: Name]` and `[Agent: Name]` tags for better conversation tracking
 - **📜 Drill Down Mechanism**: Intelligently loads full conversation transcripts when verbatim details are needed
 - **⚖️ Self-Correction**: Built-in quality control that revises responses before delivery
 - **📈 Continuous Learning**: Every interaction expands the agent's cognitive architecture
@@ -319,6 +321,51 @@ To enhance responsiveness, the agent fine-tunes the memory retrieval process its
 
 This ensures that simple, clear queries get a very fast response, while more ambiguous or complex queries still get the accuracy they need without slowing down the common case. This makes the agent feel significantly more responsive, especially during extended conversations, without compromising the depth of its cognitive and memory capabilities.
 
+### 👤 User Profile System
+
+The agent now maintains **persistent user profiles** that track information about each user across conversation sessions. This allows the agent to remember personal details and preferences, creating a more personalized experience.
+
+#### 🔑 **Key Features:**
+
+1. **🆔 Unique User Identification**: Each session gets a unique user profile with a UUID identifier
+2. **📝 Automatic Name Detection**: When users introduce themselves, the agent automatically captures and remembers their name
+3. **💾 Personal Vector Store**: Each user gets their own dedicated vector store for storing personal information
+4. **📊 Fact Tracking**: The system tracks user preferences, background information, and other relevant facts
+5. **🔄 Cross-Session Persistence**: User information persists across multiple conversation sessions
+
+#### 🏗️ **Architecture:**
+
+- **User Profile Files**: Stored in `user_profiles/` directory as JSON files (ignored by git)
+- **User Vector Stores**: Located in `vector_stores/user_specific/` for semantic retrieval of user information
+- **Session Integration**: User profiles are loaded and updated during each conversation turn
+- **Memory Integration**: User information is included in the parallel memory retrieval process
+
+### 💬 Enhanced Conversation Format
+
+The agent now uses an **enhanced conversation format** that clearly distinguishes between user and agent messages with named tags.
+
+#### 📝 **Format Specification:**
+
+All conversation history is now saved with descriptive name tags:
+
+- **User Messages**: `[User: UserName] message content`
+- **Agent Messages**: `[Agent: AgentName] message content`
+
+#### 🧠 **Agent Understanding:**
+
+The agent is specifically instructed to understand this format:
+
+- When processing conversation history, it recognizes that `[Agent: Name]` refers to its own previous responses
+- The agent can reference previous exchanges using proper context
+- Name tags help maintain clarity in multi-turn conversations
+
+#### ✨ **Benefits:**
+
+1. **🔍 Clear Attribution**: Easy to identify who said what in conversation logs
+2. **📚 Better Context**: Agent can better understand its own previous responses
+3. **🏷️ Named Interactions**: Personal names make conversations feel more natural
+4. **🔄 Session Continuity**: Enhanced ability to reference previous exchanges accurately
+
 ### ⏱️ Time Complexity Analysis (Big O)
 
 Based on the architecture described in this document, here is the Big O notation complexity for the query layer and an explanation of how processing time is affected as new layers are added.
@@ -466,7 +513,50 @@ vector_stores/
 ├── long_term_conversation_memory.faiss/  # Full conversation history
 ├── experience_layer.faiss/               # Agent's learning experiences
 ├── core_beliefs_on_truth_and_purpose.faiss/  # Agent's core beliefs
+├── user_specific/                        # User-specific vector stores
+│   ├── [uuid1].faiss/                    # Individual user profile data
+│   └── [uuid2].faiss/                    # Individual user profile data
 └── for_questions_about_[topic].faiss/    # Dynamic topic-specific layers
+```
+
+### 👤 **User Profiles (`user_profiles/`)**
+
+This directory contains individual user profile data for personalized interactions:
+
+- **Purpose**:
+
+  - Stores user-specific information including names, preferences, and personal facts
+  - Each user session gets a unique profile with UUID identifier
+  - Enables personalized conversations across multiple sessions
+  - Integrates with user-specific vector stores for semantic retrieval
+
+- **Creation**: **🤖 AUTOMATIC** - The system creates profiles automatically
+
+  - `[session_id].json` - Created when a new user session begins
+  - Profile includes name, facts, vector store path, and creation timestamp
+  - User-specific vector stores created in `vector_stores/user_specific/`
+
+- **Contents**: Each profile contains:
+
+  - `id` - Unique UUID for the user profile
+  - `name` - User's name (detected automatically when they introduce themselves)
+  - `created_at` - Profile creation timestamp
+  - `vector_store_path` - Path to user's personal vector store
+  - `facts` - Dictionary of personal information about the user
+
+- **Why Ignored**:
+  - Contains personal user information that should remain private
+  - User-specific and grows with each interaction
+  - Automatically regenerated when the agent runs
+  - Each user's data is completely isolated
+
+**Example user profiles structure**:
+
+```
+user_profiles/
+├── session_user123_456789.json          # User profile for session
+├── session_user456_789012.json          # Another user's profile
+└── session_webapp_987654.json           # Web app user profile
 ```
 
 ### ⚙️ **Configuration Files**

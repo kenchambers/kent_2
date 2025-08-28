@@ -4,6 +4,22 @@
 
 set -e
 
+# Function to kill processes on specified ports
+kill_on_port() {
+    PORT=$1
+    echo "🔍 Checking for process on port $PORT..."
+    PID=$(lsof -t -i:$PORT || true)
+    
+    if [ ! -z "$PID" ]; then
+        echo "⚠️  Found process $PID on port $PORT. Terminating..."
+        kill -9 $PID
+        sleep 1 # Give it a moment to release the port
+        echo "✅ Process terminated."
+    else
+        echo "✅ Port $PORT is free."
+    fi
+}
+
 # Function to cleanup on exit
 cleanup() {
     echo "🧹 Cleaning up..."
@@ -12,6 +28,10 @@ cleanup() {
 trap cleanup EXIT
 
 echo "🚀 Starting Kent AI Agent in development mode..."
+
+# Kill any existing processes on the ports we need
+kill_on_port 8000
+kill_on_port 3000
 
 # Check if .env exists
 if [ ! -f ".env" ]; then

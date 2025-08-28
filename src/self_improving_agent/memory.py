@@ -59,6 +59,7 @@ def query_memory(
     initial_nprobe: int = 1,
     high_nprobe: int = 10,
     confidence_threshold: float = 0.6,
+    user_id: Optional[str] = None,
 ) -> List[Document]:
     """
     Queries the vector store for relevant information using an adaptive nprobe.
@@ -72,6 +73,7 @@ def query_memory(
         initial_nprobe: The nprobe value for the initial, fast search.
         high_nprobe: The nprobe value for the slower, more accurate search.
         confidence_threshold: The score threshold to trigger the more accurate search.
+        user_id: Optional user ID to filter results for user-specific queries.
     """
     try:
         # Set nprobe for the initial fast search
@@ -98,6 +100,10 @@ def query_memory(
     except Exception:
         # Fallback for small or problematic vector stores
         docs = vector_store.similarity_search(query, k=min(k, 5))
+
+    # Add user_id filtering if provided for an extra layer of data isolation
+    if user_id:
+        docs = [doc for doc in docs if doc.metadata.get("user_id") == user_id]
 
     # Filter out the default "initial document"
     return [doc for doc in docs if doc.page_content not in ("__EMPTY_STORE_PLACEHOLDER__", "initial document")]

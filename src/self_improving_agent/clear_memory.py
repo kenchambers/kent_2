@@ -14,6 +14,7 @@ def main():
         # Root directories and files
         os.path.join(project_root, 'vector_stores'),
         os.path.join(project_root, 'conversation_archives'),
+        os.path.join(project_root, 'user_profiles'),
         os.path.join(project_root, 'conversations.db'),
         os.path.join(project_root, 'langgraph_cache.db'),
         os.path.join(project_root, 'langgraph_cache.db-shm'),
@@ -25,6 +26,7 @@ def main():
         os.path.join(project_root, 'backend', 'langgraph_cache.db-shm'),
         os.path.join(project_root, 'backend', 'langgraph_cache.db-wal'),
         os.path.join(project_root, 'backend', 'conversation_archives'),
+        os.path.join(project_root, 'backend', 'user_profiles'),
     ]
 
     # Config files to reset from templates
